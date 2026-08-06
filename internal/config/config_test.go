@@ -68,3 +68,83 @@ func TestThresholdAndURLValidation(t *testing.T) {
 		t.Fatalf("expected host allowlist validation error")
 	}
 }
+
+func TestDefaultsExcludeProAndK12(t *testing.T) {
+	cfg, err := Parse(map[string]any{}, nil)
+	if err != nil {
+		t.Fatalf("Parse defaults: %v", err)
+	}
+	if _, ok := cfg.PlanRules["pro"]; ok {
+		t.Fatalf("pro must not be a default plan rule")
+	}
+	if _, ok := cfg.PlanRules["k12"]; ok {
+		t.Fatalf("k12 must not be a default plan rule")
+	}
+}
+
+func TestEnabledNotificationEnvValidation(t *testing.T) {
+	calls := []string{}
+	getenv := func(key string) string {
+		calls = append(calls, key)
+		switch key {
+		case "SMTP_PASSWORD", "SMTP_RECIPIENTS", "WEBHOOK_URL", "WEBHOOK_AUTH":
+			return "configured"
+		default:
+			return ""
+		}
+	}
+	_, err := Parse(map[string]any{
+		"smtp":    map[string]any{"enabled": true, "password_env": "SMTP_PASSWORD", "recipients_env": "SMTP_RECIPIENTS"},
+		"webhook": map[string]any{"enabled": true, "url_env": "WEBHOOK_URL", "auth_header_env": "WEBHOOK_AUTH"},
+	}, getenv)
+	if err != nil {
+		t.Fatalf("Parse enabled notifications: %v", err)
+	}
+	want := map[string]bool{"SMTP_PASSWORD": true, "SMTP_RECIPIENTS": true, "WEBHOOK_URL": true, "WEBHOOK_AUTH": true}
+	for _, call := range calls {
+		delete(want, call)
+	}
+	if len(want) != 0 {
+		t.Fatalf("getenv missing calls: %v, calls=%v", want, calls)
+	}
+}
+
+func TestEnabledNotificationMissingEnvFailsWithoutValueEcho(t *testing.T) {
+	_, err := Parse(map[string]any{
+		"smtp": map[string]any{"enabled": true, "password_env": "SMTP_PASSWORD", "recipients_env": "SMTP_RECIPIENTS"},
+	}, func(key string) string {
+		if key == "SMTP_PASSWORD" {
+			return "super-secret-value"
+		}
+		return ""
+	})
+	if err == nil {
+		t.Fatalf("expected missing env error")
+	}
+	if got := err.Error(); got == "" || contains(got, "super-secret-value") {
+		t.Fatalf("error must be stable and must not echo env value: %q", got)
+	}
+}
+
+func TestDisabledNotificationDoesNotCallGetenv(t *testing.T) {
+	called := false
+	_, err := Parse(map[string]any{
+		"smtp":    map[string]any{"enabled": false, "password_env": "SMTP_PASSWORD", "recipients_env": "SMTP_RECIPIENTS"},
+		"webhook": map[string]any{"enabled": false, "url_env": "WEBHOOK_URL", "auth_header_env": "WEBHOOK_AUTH"},
+	}, func(string) string { called = true; return "" })
+	if err != nil {
+		t.Fatalf("Parse disabled notifications: %v", err)
+	}
+	if called {
+		t.Fatalf("getenv must not be called for disabled notifications")
+	}
+}
+
+func contains(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}

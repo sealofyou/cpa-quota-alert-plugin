@@ -81,3 +81,77 @@ func TestMissingPercentRequiresResetBackedExhaustion(t *testing.T) {
 		t.Fatalf("expected missing percent error")
 	}
 }
+
+func TestDurationFieldsClassifyWindows(t *testing.T) {
+	q, err := ParseWham([]byte(`{
+		"plan_type":"plus",
+		"rate_limit":{
+			"primary":{"used_percent":10,"duration":18000},
+			"secondary":{"used_percent":20,"durationSeconds":604800}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("ParseWham duration fields: %v", err)
+	}
+	if q.Windows[Window5h].RemainingPercent != 90 || q.Windows[Window7d].RemainingPercent != 80 {
+		t.Fatalf("unexpected duration classification: %+v", q.Windows)
+	}
+	q, err = ParseWham([]byte(`{"plan_type":"plus","rate_limit":{"used_percent":30,"duration_seconds":604800}}`))
+	if err != nil {
+		t.Fatalf("ParseWham duration_seconds: %v", err)
+	}
+	if q.Windows[Window7d].RemainingPercent != 70 {
+		t.Fatalf("unexpected duration_seconds classification: %+v", q.Windows)
+	}
+}
+
+func TestMixedSuccessAndUnknownPlanReturnsPlanChanged(t *testing.T) {
+	snap, err := Aggregate([]AccountInput{
+		{Enabled: true, Body: []byte(`{"plan_type":"plus","rate_limit":{"secondary":{"used_percent":50,"limit_window_seconds":604800}}}`)},
+		{Enabled: true, Body: []byte(`{"plan_type":"enterprise","rate_limit":{"secondary":{"used_percent":25,"limit_window_seconds":604800}}}`)},
+	}, testRules(), time.Now())
+	var changed *PlanChangedError
+	if !errors.As(err, &changed) || changed.UnknownPlans["enterprise"] != 1 {
+		t.Fatalf("expected PlanChangedError for mixed success+unknown, got snap=%+v err=%v", snap, err)
+	}
+}
+
+func TestEmptyInputNotComputable(t *testing.T) {
+	_, err := Aggregate(nil, testRules(), time.Now())
+	if !errors.Is(err, ErrNotComputable) {
+		t.Fatalf("expected ErrNotComputable for empty input, got %v", err)
+	}
+}
+
+func TestInvalidUsedPercentIsLocalParseError(t *testing.T) {
+	snap, err := Aggregate([]AccountInput{
+		{Enabled: true, Body: []byte(`{"plan_type":"plus","rate_limit":{"secondary":{"used_percent":-1,"limit_window_seconds":604800}}}`)},
+		{Enabled: true, Body: []byte(`{"plan_type":"team","rate_limit":{"secondary":{"used_percent":101,"limit_window_seconds":604800}}}`)},
+	}, testRules(), time.Now())
+	if !errors.Is(err, ErrNotComputable) || snap.UnresolvedCodeCounts["parse_error"] != 2 {
+		t.Fatalf("invalid used percent should be local parse errors and all-unresolved not computable: snap=%+v err=%v", snap, err)
+	}
+}
+
+func TestExhaustionInferenceRequiresResetInfo(t *testing.T) {
+	for _, body := range []string{
+		`{"plan_type":"plus","rate_limit":{"secondary":{"limit_window_seconds":604800,"allowed":false}}}`,
+		`{"plan_type":"plus","rate_limit":{"secondary":{"limit_window_seconds":604800,"limit_reached":true}}}`,
+	} {
+		if _, err := ParseWham([]byte(body)); err == nil {
+			t.Fatalf("expected missing percent error without reset info for %s", body)
+		}
+	}
+	for _, body := range []string{
+		`{"plan_type":"plus","rate_limit":{"secondary":{"limit_window_seconds":604800,"allowed":false,"reset_seconds":10}}}`,
+		`{"plan_type":"plus","rate_limit":{"secondary":{"limit_window_seconds":604800,"limit_reached":true,"resetAt":"soon"}}}`,
+	} {
+		q, err := ParseWham([]byte(body))
+		if err != nil {
+			t.Fatalf("expected reset-backed exhaustion for %s: %v", body, err)
+		}
+		if q.Windows[Window7d].RemainingPercent != 0 {
+			t.Fatalf("expected zero remaining: %+v", q.Windows[Window7d])
+		}
+	}
+}

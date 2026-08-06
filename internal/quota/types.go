@@ -276,7 +276,7 @@ func parseWindow(raw map[string]any, fallback string) (Window, error) {
 }
 
 func windowName(raw map[string]any, fallback string) (string, error) {
-	seconds, ok := getFloat(raw, "limit_window_seconds", "limitWindowSeconds", "window_seconds", "windowSeconds")
+	seconds, ok := getFloat(raw, "limit_window_seconds", "limitWindowSeconds", "window_seconds", "windowSeconds", "duration", "duration_seconds", "durationSeconds")
 	if ok {
 		switch int(seconds) {
 		case Window5hSeconds:

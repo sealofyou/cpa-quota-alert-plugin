@@ -12,9 +12,17 @@ import (
 	"github.com/sealofyou/cpa-quota-alert-plugin/internal/monitor"
 )
 
+type File interface {
+	io.Reader
+	io.Writer
+	Close() error
+	Sync() error
+	Chmod(mode os.FileMode) error
+}
+
 type FS interface {
-	Open(name string) (*os.File, error)
-	OpenFile(name string, flag int, perm os.FileMode) (*os.File, error)
+	Open(name string) (File, error)
+	OpenFile(name string, flag int, perm os.FileMode) (File, error)
 	Rename(oldpath, newpath string) error
 	Remove(name string) error
 	Chmod(name string, mode os.FileMode) error
@@ -23,8 +31,8 @@ type FS interface {
 
 type OSFS struct{}
 
-func (OSFS) Open(name string) (*os.File, error) { return os.Open(name) }
-func (OSFS) OpenFile(name string, flag int, perm os.FileMode) (*os.File, error) {
+func (OSFS) Open(name string) (File, error) { return os.Open(name) }
+func (OSFS) OpenFile(name string, flag int, perm os.FileMode) (File, error) {
 	return os.OpenFile(name, flag, perm)
 }
 func (OSFS) Rename(oldpath, newpath string) error { return os.Rename(oldpath, newpath) }
@@ -83,6 +91,11 @@ func (s Store) Save(state monitor.State) error {
 	if err := fs.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
 	tmpName := filepath.Join(dir, fmt.Sprintf(".%s.tmp-%d-%d", filepath.Base(s.Path), os.Getpid(), time.Now().UnixNano()))
 	tmp, err := fs.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -104,9 +117,7 @@ func (s Store) Save(state monitor.State) error {
 		cleanup()
 		return err
 	}
-	encoder := json.NewEncoder(tmp)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(state); err != nil {
+	if err := writeAll(tmp, data); err != nil {
 		cleanup()
 		return err
 	}
@@ -129,7 +140,21 @@ func (s Store) Save(state monitor.State) error {
 		return fmt.Errorf("atomic state rename: %w", err)
 	}
 	_ = fs.Chmod(s.Path, 0o600)
-	syncDir(dir)
+	syncDir(fs, dir)
+	return nil
+}
+
+func writeAll(file File, data []byte) error {
+	for len(data) > 0 {
+		n, err := file.Write(data)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		data = data[n:]
+	}
 	return nil
 }
 
@@ -140,8 +165,8 @@ func (s Store) fs() FS {
 	return OSFS{}
 }
 
-func syncDir(dir string) {
-	file, err := os.Open(dir)
+func syncDir(fs FS, dir string) {
+	file, err := fs.Open(dir)
 	if err != nil {
 		return
 	}

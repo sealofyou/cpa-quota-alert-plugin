@@ -132,6 +132,9 @@ func Parse(raw map[string]any, getenv Getenv) (Config, error) {
 	if webhookRaw, ok := objectValue(raw["webhook"]); ok {
 		cfg.Webhook = parseWebhook(webhookRaw)
 	}
+	if err := validateNotificationEnv(cfg, getenv); err != nil {
+		return Config{}, err
+	}
 
 	parsedURL, err := url.Parse(cfg.QuotaURL)
 	if err != nil || !parsedURL.IsAbs() || parsedURL.Hostname() == "" {
@@ -147,10 +150,38 @@ func Parse(raw map[string]any, getenv Getenv) (Config, error) {
 	}
 	cfg.PlanRules = rules
 	cfg.Aliases = aliases
-	_ = getenv
 	return cfg, nil
 }
 
+func validateNotificationEnv(cfg Config, getenv Getenv) error {
+	if cfg.SMTP.Enabled {
+		if err := requireEnv(getenv, "smtp.password_env", cfg.SMTP.PasswordEnv); err != nil {
+			return err
+		}
+		if err := requireEnv(getenv, "smtp.recipients_env", cfg.SMTP.RecipientsEnv); err != nil {
+			return err
+		}
+	}
+	if cfg.Webhook.Enabled {
+		if err := requireEnv(getenv, "webhook.url_env", cfg.Webhook.URLenv); err != nil {
+			return err
+		}
+		if err := requireEnv(getenv, "webhook.auth_header_env", cfg.Webhook.AuthHeaderEnv); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func requireEnv(getenv Getenv, label, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("%s must name an environment variable when channel is enabled", label)
+	}
+	if strings.TrimSpace(getenv(name)) == "" {
+		return fmt.Errorf("%s environment variable %q is required and must be non-empty", label, name)
+	}
+	return nil
+}
 func parseRules(raw any, ignored PlanSet) (map[string]PlanRule, map[string]string, error) {
 	var candidates []any
 	if raw == nil {
