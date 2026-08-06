@@ -21,4 +21,4 @@ The plugin must not receive or store the CPA Management Key. Codex access materi
 
 ## Reporting
 
-Open a GitHub security advisory or private issue path when the public repository is created. Until then, do not publish exploit details in public issues.
+Use GitHub Security Advisories or private vulnerability reporting when available. Do not publish exploit details, credentials, or production configuration in public issues.
