@@ -52,4 +52,4 @@ Windows PowerShell 入口：
 powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 ```
 
-当前 scaffold 没有 Go package，因此 Go test 和 vet 会跳过。后续有实现包后，验证扩展为 `go test ./...`、`go vet ./...` 和只读 `gofmt -l` 检查。
+当前 scaffold 没有 Go package，因此 Go 检查会跳过。后续有实现包后，验证扩展为只读 `gofmt -l`、`go test ./...`、`go test -race ./...`、`go vet ./...` 和 Linux amd64 `go build -buildmode=c-shared` 检查。

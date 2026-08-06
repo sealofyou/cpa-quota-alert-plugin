@@ -70,7 +70,7 @@ Windows PowerShell entry:
 powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 ```
 
-The scaffold has no Go packages yet, so Go test and vet checks are skipped until implementation files exist. When implementation packages exist, verification expands to `go test ./...`, `go vet ./...`, and read-only `gofmt -l` checks.
+The scaffold has no Go packages yet, so Go checks are skipped until implementation files exist. When implementation packages exist, verification expands to read-only `gofmt -l`, `go test ./...`, `go test -race ./...`, `go vet ./...`, and Linux amd64 `go build -buildmode=c-shared` checks.
 
 ## Third-Party References
 
