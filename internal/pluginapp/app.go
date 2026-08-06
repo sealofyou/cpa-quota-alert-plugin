@@ -150,6 +150,10 @@ func (a *App) Shutdown() {
 	a.Close()
 }
 
+// Close is intentionally non-blocking because App.Call(plugin.shutdown) may be
+// used by pure-Go or non-official hosts without CPA's guarded native shutdown
+// ordering. Official native shutdown calls ShutdownAndWait after detaching the
+// App from the global dispatcher.
 func (a *App) Close() {
 	if a == nil {
 		return

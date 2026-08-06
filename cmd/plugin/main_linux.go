@@ -125,7 +125,14 @@ func cliproxy_plugin_init(host *C.cliproxy_host_api, plugin *C.cliproxy_plugin_a
 	globalApp = nil
 	globalMu.Unlock()
 	if old != nil {
-		old.Close()
+		// CPA v7.2.83/v7.2.120 guards native plugins by marking the
+		// client closed and waiting for active plugin.call entries before
+		// invoking native shutdown. Re-init follows the same non-reentrant
+		// lifecycle boundary here: detach the old app without holding
+		// globalMu, drain plugin-owned management work, then install the new
+		// host snapshot. Do not generalize this blocking wait to unknown
+		// hosts that might synchronously re-enter lifecycle callbacks.
+		old.ShutdownAndWait()
 	}
 
 	app := pluginapp.NewWithHost(os.Getenv, newHostClientFactory(hostSnapshot))
@@ -200,7 +207,13 @@ func cliproxyPluginShutdown() {
 	globalApp = nil
 	globalMu.Unlock()
 	if app != nil {
-		app.Close()
+		// Official CPA v7.2.83/v7.2.120 drains active plugin.call entries
+		// before calling this native shutdown hook, and the Unix dynamic
+		// library client deletes the host callback entry, frees hostCtx, and
+		// dlcloses only after shutdown returns. Therefore native shutdown
+		// must synchronously drain plugin-owned management work here so no
+		// plugin goroutine can run after the .so may be unloaded.
+		app.ShutdownAndWait()
 	}
 	C.clear_host_api()
 }
