@@ -1,6 +1,8 @@
-.PHONY: verify check-structure check-format
+.PHONY: verify linux-release-gate check-structure check-format test vet race build-shared
 
-verify: check-structure check-format
+verify: check-structure check-format test vet
+
+linux-release-gate: verify race build-shared
 
 check-structure:
 	@test -f go.mod
@@ -24,3 +26,20 @@ check-format:
 			exit 1; \
 		fi; \
 	fi
+
+test:
+	go test ./...
+
+vet:
+	go vet ./...
+
+race:
+	CGO_ENABLED=1 go test -race ./...
+
+build-shared:
+	@mkdir -p dist
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
+		-buildmode=c-shared \
+		-trimpath \
+		-ldflags='-s -w -buildid=' \
+		-o dist/cpa-quota-alert-plugin.so ./cmd/plugin

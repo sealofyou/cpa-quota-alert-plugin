@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  scaffold-release-gate:
+  linux-release-gate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -20,16 +20,19 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Verify scaffold
-        run: make verify
+      - name: Verify Linux plugin
+        run: make linux-release-gate
 
-      - name: Record scaffold release note
+      - name: Create checksum
         run: |
-          mkdir -p dist
-          printf '%s\n' 'This tag passed the scaffold release gate. Plugin binary packaging starts after ABI implementation exists.' > dist/SCAFFOLD_RELEASE_NOTE.txt
+          cd dist
+          sha256sum cpa-quota-alert-plugin.so > cpa-quota-alert-plugin.so.sha256
 
-      - name: Upload scaffold note
+      - name: Upload verified assets
         uses: actions/upload-artifact@v4
         with:
-          name: scaffold-release-note
-          path: dist/SCAFFOLD_RELEASE_NOTE.txt
+          name: cpa-quota-alert-plugin-linux-amd64
+          if-no-files-found: error
+          path: |
+            dist/cpa-quota-alert-plugin.so
+            dist/cpa-quota-alert-plugin.so.sha256

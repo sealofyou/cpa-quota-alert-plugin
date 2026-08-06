@@ -56,16 +56,25 @@ static void clear_host_api(void) {
 	stored_host.free_buffer = NULL;
 }
 
-static int call_host_api(const char* method, const uint8_t* request, size_t request_len, cliproxy_buffer* response) {
-	if (!stored_host_valid || stored_host.call == NULL) {
-		return 1;
+
+static int snapshot_host_api(cliproxy_host_api* snapshot) {
+	if (snapshot == NULL || !stored_host_valid || stored_host.call == NULL || stored_host.free_buffer == NULL) {
+		return 0;
 	}
-	return stored_host.call(stored_host.host_ctx, method, request, request_len, response);
+	*snapshot = stored_host;
+	return 1;
 }
 
-static void free_host_buffer(void* ptr, size_t len) {
-	if (stored_host_valid && stored_host.free_buffer != NULL && ptr != NULL) {
-		stored_host.free_buffer(ptr, len);
+static int call_host_snapshot(const cliproxy_host_api* snapshot, const char* method, const uint8_t* request, size_t request_len, cliproxy_buffer* response) {
+	if (snapshot == NULL || snapshot->call == NULL) {
+		return 1;
+	}
+	return snapshot->call(snapshot->host_ctx, method, request, request_len, response);
+}
+
+static void free_host_snapshot(const cliproxy_host_api* snapshot, void* ptr, size_t len) {
+	if (snapshot != NULL && snapshot->free_buffer != NULL && ptr != NULL) {
+		snapshot->free_buffer(ptr, len);
 	}
 }
 */
@@ -200,13 +209,16 @@ func (nativeHostCaller) Call(ctx context.Context, method string, request []byte)
 	}
 
 	// The CPA ABI is synchronous and has no per-call cancellation or timeout
-	// field. Holding the read lock prevents shutdown from clearing function
-	// pointers while the callback is active, but context cancellation can only
-	// be observed before and after the host call. Linux integration tests must
-	// verify the host's own HTTP timeout behavior before release.
+	// field. Snapshot the host callbacks while protected, then release the
+	// global lock before entering host code so a synchronous callback can
+	// re-enter plugin shutdown or initialization without deadlocking. Context
+	// cancellation can only be observed before and after the host call. Linux
+	// integration tests must verify the host's own HTTP timeout behavior.
+	var snapshot C.cliproxy_host_api
 	globalMu.RLock()
-	defer globalMu.RUnlock()
-	if globalApp == nil {
+	available := globalApp != nil && C.snapshot_host_api(&snapshot) != 0
+	globalMu.RUnlock()
+	if !available {
 		return nil, errHostCallback
 	}
 
@@ -227,9 +239,9 @@ func (nativeHostCaller) Call(ctx context.Context, method string, request []byte)
 	}
 
 	var response C.cliproxy_buffer
-	callCode := C.call_host_api(cMethod, requestPtr, C.size_t(len(request)), &response)
+	callCode := C.call_host_snapshot(&snapshot, cMethod, requestPtr, C.size_t(len(request)), &response)
 	if response.ptr != nil {
-		defer C.free_host_buffer(response.ptr, response.len)
+		defer C.free_host_snapshot(&snapshot, response.ptr, response.len)
 	}
 	if callCode != 0 || response.ptr == nil || response.len == 0 || uint64(response.len) > uint64(math.MaxInt32) {
 		return nil, errHostCallback

@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  scaffold:
+  linux-gate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -24,8 +24,13 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Verify scaffold
-        run: make verify
+      - name: Verify Linux plugin
+        run: make linux-release-gate
+
+      - name: Verify shared-library artifacts
+        run: |
+          test -s dist/cpa-quota-alert-plugin.so
+          test -s dist/cpa-quota-alert-plugin.h
 
       - name: Check committed whitespace
         run: git show --check --format= HEAD
