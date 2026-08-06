@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   linux-release-gate:
     runs-on: ubuntu-latest
@@ -41,10 +45,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
+          RELEASE_NOTES: Linux amd64 CPA native plugin release candidate assets. Verify cpa-quota-alert-plugin.so against the attached SHA-256 checksum before installing.
         run: |
-          gh release create "$TAG_NAME" \
-            dist/cpa-quota-alert-plugin.so \
-            dist/cpa-quota-alert-plugin.so.sha256 \
-            --verify-tag \
-            --title "$TAG_NAME" \
-            --notes "Linux amd64 CPA native plugin release candidate assets. Verify cpa-quota-alert-plugin.so against the attached SHA-256 checksum before installing."
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" \
+              --title "$TAG_NAME" \
+              --notes "$RELEASE_NOTES"
+            gh release upload "$TAG_NAME" \
+              dist/cpa-quota-alert-plugin.so \
+              dist/cpa-quota-alert-plugin.so.sha256 \
+              --clobber
+          else
+            gh release create "$TAG_NAME" \
+              dist/cpa-quota-alert-plugin.so \
+              dist/cpa-quota-alert-plugin.so.sha256 \
+              --verify-tag \
+              --title "$TAG_NAME" \
+              --notes "$RELEASE_NOTES"
+          fi
