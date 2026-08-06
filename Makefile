@@ -16,4 +16,11 @@ check-structure:
 	@test -d internal/abi
 
 check-format:
-	@if find . -name '*.go' -print -quit | grep -q .; then gofmt -w $$(find . -name '*.go' -print); fi
+	@files=$$(find . -name '*.go' -print); \
+	if [ -n "$$files" ]; then \
+		unformatted=$$(gofmt -l $$files); \
+		if [ -n "$$unformatted" ]; then \
+			printf '%s\n' "$$unformatted"; \
+			exit 1; \
+		fi; \
+	fi

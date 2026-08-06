@@ -40,9 +40,16 @@ v0.1 插件计划：
 
 ## 开发验证
 
+GNU make / POSIX shell 入口：
+
 ```sh
 make verify
-git diff --check
 ```
 
-后续有实现包后，验证扩展为 `go test ./...`、`go test -race ./...`、`go vet ./...` 和 Linux amd64 c-shared build。
+Windows PowerShell 入口：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
+```
+
+当前 scaffold 没有 Go package，因此 Go test 和 vet 会跳过。后续有实现包后，验证扩展为 `go test ./...`、`go vet ./...` 和只读 `gofmt -l` 检查。

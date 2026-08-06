@@ -58,12 +58,19 @@ docs/                project harness and runbooks
 
 ## Development
 
+GNU make / POSIX shell entry:
+
 ```sh
 make verify
-git diff --check
 ```
 
-When implementation packages exist, verification will expand to `go test ./...`, `go test -race ./...`, `go vet ./...`, and Linux amd64 c-shared build checks.
+Windows PowerShell entry:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
+```
+
+The scaffold has no Go packages yet, so Go test and vet checks are skipped until implementation files exist. When implementation packages exist, verification expands to `go test ./...`, `go vet ./...`, and read-only `gofmt -l` checks.
 
 ## Third-Party References
 
