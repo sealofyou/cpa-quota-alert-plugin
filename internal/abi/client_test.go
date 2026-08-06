@@ -126,6 +126,65 @@ func TestClientHTTPDoExactRequestAndDeepCopy(t *testing.T) {
 	}
 }
 
+func TestClientHTTPDoAcceptsOfficialStatusCodeWireField(t *testing.T) {
+	caller := &recordingCaller{resp: envelope(t, `{"StatusCode":201,"Headers":{"x-one":["a"]},"Body":"b2s="}`)}
+	client := NewClient(caller, "host-123")
+
+	resp, err := client.HTTPDo(context.Background(), HTTPRequest{Method: "GET", URL: "https://example.com"})
+	if err != nil {
+		t.Fatalf("HTTPDo: %v", err)
+	}
+	if resp.StatusCode != 201 {
+		t.Fatalf("StatusCode = %d, want 201", resp.StatusCode)
+	}
+	if resp.Headers["x-one"][0] != "a" || string(resp.Body) != "ok" {
+		t.Fatalf("unexpected response: %+v body=%s", resp.Headers, resp.Body)
+	}
+}
+
+func TestClientHTTPDoAcceptsLegacyStatusCodeWireField(t *testing.T) {
+	caller := &recordingCaller{resp: envelope(t, `{"status_code":202,"headers":{"x-one":["a"]},"body":"b2s="}`)}
+	client := NewClient(caller, "host-123")
+
+	resp, err := client.HTTPDo(context.Background(), HTTPRequest{Method: "GET", URL: "https://example.com"})
+	if err != nil {
+		t.Fatalf("HTTPDo: %v", err)
+	}
+	if resp.StatusCode != 202 {
+		t.Fatalf("StatusCode = %d, want 202", resp.StatusCode)
+	}
+}
+
+func TestClientHTTPDoRejectsInvalidStatusCodeWireFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		result string
+	}{
+		{
+			name:   "missing",
+			result: `{"headers":{"x-one":["a"]},"body":"b2s="}`,
+		},
+		{
+			name:   "zero",
+			result: `{"StatusCode":0,"Headers":{"x-one":["a"]},"Body":"b2s="}`,
+		},
+		{
+			name:   "conflict",
+			result: `{"StatusCode":200,"status_code":201,"Headers":{"x-one":["a"]},"Body":"b2s="}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			caller := &recordingCaller{resp: envelope(t, tt.result)}
+			client := NewClient(caller, "host-123")
+			if _, err := client.HTTPDo(context.Background(), HTTPRequest{Method: "GET", URL: "https://example.com"}); !errors.Is(err, ErrInvalidResult) {
+				t.Fatalf("expected ErrInvalidResult, got %v", err)
+			}
+		})
+	}
+}
+
 func TestClientCallbackErrorAndInvalidEnvelopeAreRedacted(t *testing.T) {
 	caller := &recordingCaller{resp: []byte(`{"ok":false,"error":{"code":"acct123TOKEN","message":"Bearer tok path email@example.com","status":401,"retryable":true}}`)}
 	client := NewClient(caller, "")

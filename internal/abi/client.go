@@ -106,6 +106,66 @@ type HTTPResponse struct {
 	Body       []byte              `json:"body"`
 }
 
+func (r *HTTPResponse) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Headers map[string][]string `json:"headers"`
+		Body    []byte              `json:"body"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	status, err := decodeHTTPStatusCode(fields)
+	if err != nil {
+		return err
+	}
+
+	r.StatusCode = status
+	r.Headers = wire.Headers
+	r.Body = wire.Body
+	return nil
+}
+
+func decodeHTTPStatusCode(fields map[string]json.RawMessage) (int, error) {
+	statusCode, hasStatusCode, err := decodeHTTPStatusCodeField(fields, "StatusCode")
+	if err != nil {
+		return 0, err
+	}
+	statusCodeSnake, hasStatusCodeSnake, err := decodeHTTPStatusCodeField(fields, "status_code")
+	if err != nil {
+		return 0, err
+	}
+	if hasStatusCode && hasStatusCodeSnake && statusCode != statusCodeSnake {
+		return 0, ErrInvalidResult
+	}
+	if hasStatusCode {
+		return statusCode, nil
+	}
+	if hasStatusCodeSnake {
+		return statusCodeSnake, nil
+	}
+	return 0, ErrInvalidResult
+}
+
+func decodeHTTPStatusCodeField(fields map[string]json.RawMessage, name string) (int, bool, error) {
+	raw, ok := fields[name]
+	if !ok {
+		return 0, false, nil
+	}
+	var statusCode int
+	if err := json.Unmarshal(raw, &statusCode); err != nil {
+		return 0, true, ErrInvalidResult
+	}
+	if statusCode == 0 {
+		return 0, true, ErrInvalidResult
+	}
+	return statusCode, true, nil
+}
+
 func (c *Client) ListAuth(ctx context.Context) ([]HostAuthFileEntry, error) {
 	var result struct {
 		Files []HostAuthFileEntry `json:"files"`
