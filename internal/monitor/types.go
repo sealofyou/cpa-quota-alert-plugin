@@ -104,10 +104,7 @@ func Evaluate(current State, input Input, now time.Time) State {
 		return next
 	}
 
-	total := input.Snapshot.TotalByWindow[quota.Window7d]
-	if total == 0 {
-		total = input.Snapshot.Total
-	}
+	total := input.Snapshot.Total
 	next.ConsecutiveFailures = 0
 	next.ErrorActive = false
 	next.LastErrorCode = ""

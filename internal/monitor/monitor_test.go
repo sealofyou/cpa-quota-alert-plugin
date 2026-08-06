@@ -12,6 +12,26 @@ func snapshot(total float64) *quota.Snapshot {
 	return &quota.Snapshot{Total: total, TotalByWindow: map[string]float64{quota.Window7d: total}}
 }
 
+func TestEvaluateUsesAggregatedTotalForMixedWindows(t *testing.T) {
+	now := time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)
+	st := Evaluate(State{}, Input{
+		Snapshot: &quota.Snapshot{
+			Total: 1.6,
+			TotalByWindow: map[string]float64{
+				quota.Window7d: 1.4,
+				quota.Window5h: 0.2,
+			},
+		},
+		Channels: []string{"smtp"},
+	}, now)
+	if st.LowActive || len(st.PendingEvents) != 0 {
+		t.Fatalf("mixed windows should use aggregated total and stay above low threshold: %+v", st)
+	}
+	if st.LastValidTotal != 1.6 {
+		t.Fatalf("last valid total should be aggregated total, got %v", st.LastValidTotal)
+	}
+}
+
 func TestLowReminderRecoveryHysteresis(t *testing.T) {
 	now := time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)
 	st := Evaluate(State{}, Input{Snapshot: snapshot(1.49), Channels: []string{"smtp"}}, now)
