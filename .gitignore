@@ -1,0 +1,26 @@
+# Go
+/bin/
+/dist/
+/build/
+*.so
+*.h
+*.test
+coverage.out
+
+# Local config and secrets
+.env
+.env.*
+*.local
+*.key
+*.pem
+*.crt
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Runtime state
+*.state
+*.log
