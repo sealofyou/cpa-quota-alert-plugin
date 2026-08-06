@@ -169,6 +169,18 @@ func TestClientHTTPDoRejectsInvalidStatusCodeWireFields(t *testing.T) {
 			result: `{"StatusCode":0,"Headers":{"x-one":["a"]},"Body":"b2s="}`,
 		},
 		{
+			name:   "negative",
+			result: `{"StatusCode":-1,"Headers":{"x-one":["a"]},"Body":"b2s="}`,
+		},
+		{
+			name:   "below",
+			result: `{"StatusCode":99,"Headers":{"x-one":["a"]},"Body":"b2s="}`,
+		},
+		{
+			name:   "above",
+			result: `{"StatusCode":600,"Headers":{"x-one":["a"]},"Body":"b2s="}`,
+		},
+		{
 			name:   "conflict",
 			result: `{"StatusCode":200,"status_code":201,"Headers":{"x-one":["a"]},"Body":"b2s="}`,
 		},

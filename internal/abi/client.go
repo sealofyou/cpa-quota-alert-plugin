@@ -160,7 +160,7 @@ func decodeHTTPStatusCodeField(fields map[string]json.RawMessage, name string) (
 	if err := json.Unmarshal(raw, &statusCode); err != nil {
 		return 0, true, ErrInvalidResult
 	}
-	if statusCode == 0 {
+	if statusCode < 100 || statusCode > 599 {
 		return 0, true, ErrInvalidResult
 	}
 	return statusCode, true, nil
