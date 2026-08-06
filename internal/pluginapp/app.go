@@ -2,12 +2,14 @@ package pluginapp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"sync"
 
 	"github.com/sealofyou/cpa-quota-alert-plugin/internal/config"
+	"github.com/sealofyou/cpa-quota-alert-plugin/internal/management"
 )
 
 const (
@@ -27,6 +29,10 @@ type App struct {
 	mu         sync.RWMutex
 	getenv     config.Getenv
 	parse      ConfigParser
+	handler    *management.Handler
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
 	current    config.Config
 	configured bool
 	closed     bool
@@ -44,7 +50,8 @@ type EnvelopeError struct {
 }
 
 type lifecycleRequest struct {
-	ConfigYAML []byte `json:"config_yaml"`
+	SchemaVersion uint32 `json:"schema_version,omitempty"`
+	ConfigYAML    []byte `json:"config_yaml"`
 }
 
 type registration struct {
@@ -73,7 +80,17 @@ type registrationCapabilities struct {
 }
 
 func New(getenv config.Getenv) *App {
-	return &App{getenv: getenv, parse: config.ParseYAML}
+	return NewWithHost(getenv, nil)
+}
+
+func NewWithHost(getenv config.Getenv, hostFactory HostClientFactory) *App {
+	ctx, cancel := context.WithCancel(context.Background())
+	app := &App{getenv: getenv, parse: config.ParseYAML, ctx: ctx, cancel: cancel}
+	handler, err := newRuntimeHandler(app, getenv, hostFactory)
+	if err == nil {
+		app.handler = handler
+	}
+	return app
 }
 
 // Call is the pure-Go side of the native ABI dispatcher. It always returns a
@@ -100,6 +117,13 @@ func (a *App) Call(method string, request []byte) (response []byte, returnCode i
 			return errorEnvelope("invalid_config", "configuration is invalid"), 1
 		}
 		return okEnvelope(pluginRegistration()), 0
+	case management.MethodManagementRegister:
+		if err := validateManagementRegisterRequest(request); err != nil {
+			return errorEnvelope("invalid_request", "management request is invalid"), 1
+		}
+		return a.callManagement(method, request)
+	case management.MethodManagementHandle:
+		return a.callManagement(method, request)
 	case MethodPluginShutdown:
 		a.Shutdown()
 		return okEnvelope(map[string]any{}), 0
@@ -123,14 +147,33 @@ func (a *App) Current() (config.Config, bool) {
 }
 
 func (a *App) Shutdown() {
+	a.Close()
+}
+
+func (a *App) Close() {
 	if a == nil {
 		return
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.closed = true
 	a.configured = false
 	a.current = config.Config{}
+	if a.cancel != nil {
+		a.cancel()
+	}
+	a.mu.Unlock()
+}
+
+func (a *App) Wait() {
+	if a == nil {
+		return
+	}
+	a.wg.Wait()
+}
+
+func (a *App) ShutdownAndWait() {
+	a.Close()
+	a.Wait()
 }
 
 func (a *App) configure(request []byte) error {
@@ -161,6 +204,47 @@ func (a *App) configure(request []byte) error {
 	return nil
 }
 
+func (a *App) callManagement(method string, request []byte) ([]byte, int) {
+	ctx, handler, done, err := a.beginManagementCall()
+	if err != nil {
+		if errors.Is(err, errManagementShutdown) {
+			return errorEnvelope("plugin_shutdown", "plugin is shut down"), 1
+		}
+		if errors.Is(err, errManagementNotConfigured) {
+			return errorEnvelope("not_configured", "plugin is not configured"), 1
+		}
+		return errorEnvelope("management_unavailable", "management handler is unavailable"), 1
+	}
+	defer done()
+	raw, code := handler.Call(ctx, method, request)
+	if code != 0 {
+		return errorEnvelope("management_error", "management call failed"), 1
+	}
+	return okEnvelopeRaw(raw), 0
+}
+
+var (
+	errManagementShutdown      = errors.New("plugin is shut down")
+	errManagementNotConfigured = errors.New("plugin is not configured")
+	errManagementUnavailable   = errors.New("management handler is unavailable")
+)
+
+func (a *App) beginManagementCall() (context.Context, *management.Handler, func(), error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed {
+		return nil, nil, nil, errManagementShutdown
+	}
+	if !a.configured {
+		return nil, nil, nil, errManagementNotConfigured
+	}
+	if a.handler == nil || a.ctx == nil {
+		return nil, nil, nil, errManagementUnavailable
+	}
+	a.wg.Add(1)
+	return a.ctx, a.handler, a.wg.Done, nil
+}
+
 func decodeLifecycleRequest(raw []byte) (lifecycleRequest, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return lifecycleRequest{}, nil
@@ -175,7 +259,29 @@ func decodeLifecycleRequest(raw []byte) (lifecycleRequest, error) {
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return lifecycleRequest{}, errors.New("invalid lifecycle request")
 	}
+	if req.SchemaVersion > 2 {
+		return lifecycleRequest{}, errors.New("unsupported lifecycle request schema")
+	}
 	return req, nil
+}
+
+func validateManagementRegisterRequest(raw []byte) error {
+	if len(raw) > management.MaxManagementRequestBytes {
+		return errors.New("management register request is too large")
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return errors.New("invalid management register request")
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return errors.New("invalid management register request")
+	}
+	return nil
 }
 
 func pluginRegistration() registration {
@@ -193,13 +299,24 @@ func pluginRegistration() registration {
 				{Name: "recovery_threshold", Type: "number", Description: "Creates a recovery event at or above this Plus-week equivalent."},
 			},
 		},
-		Capabilities: registrationCapabilities{ManagementAPI: false},
+		Capabilities: registrationCapabilities{ManagementAPI: true},
 	}
 }
 
 func okEnvelope(value any) []byte {
 	result, err := json.Marshal(value)
 	if err != nil {
+		return errorEnvelope("plugin_error", "plugin response failed")
+	}
+	raw, err := json.Marshal(Envelope{OK: true, Result: result})
+	if err != nil {
+		return []byte(`{"ok":false,"error":{"code":"plugin_error","message":"plugin response failed"}}`)
+	}
+	return raw
+}
+
+func okEnvelopeRaw(result json.RawMessage) []byte {
+	if len(result) == 0 {
 		return errorEnvelope("plugin_error", "plugin response failed")
 	}
 	raw, err := json.Marshal(Envelope{OK: true, Result: result})

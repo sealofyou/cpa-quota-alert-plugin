@@ -96,8 +96,9 @@ import (
 const abiVersion uint32 = 1
 
 var (
-	globalMu  sync.RWMutex
-	globalApp *pluginapp.App
+	lifecycleMu sync.Mutex
+	globalMu    sync.RWMutex
+	globalApp   *pluginapp.App
 
 	errHostCallback = errors.New("host callback failed")
 )
@@ -114,13 +115,22 @@ func cliproxy_plugin_init(host *C.cliproxy_host_api, plugin *C.cliproxy_plugin_a
 	if plugin == nil || C.host_api_valid(host) == 0 {
 		return 1
 	}
+	hostSnapshot := *host
 
-	app := pluginapp.New(os.Getenv)
+	lifecycleMu.Lock()
+	defer lifecycleMu.Unlock()
+
 	globalMu.Lock()
-	if globalApp != nil {
-		globalApp.Shutdown()
+	old := globalApp
+	globalApp = nil
+	globalMu.Unlock()
+	if old != nil {
+		old.Close()
 	}
-	C.store_host_api(host)
+
+	app := pluginapp.NewWithHost(os.Getenv, newHostClientFactory(hostSnapshot))
+	globalMu.Lock()
+	C.store_host_api(&hostSnapshot)
 	globalApp = app
 	globalMu.Unlock()
 
@@ -182,14 +192,17 @@ func cliproxyPluginFree(ptr unsafe.Pointer, length C.size_t) {
 //export cliproxyPluginShutdown
 func cliproxyPluginShutdown() {
 	defer func() { _ = recover() }()
+	lifecycleMu.Lock()
+	defer lifecycleMu.Unlock()
+
 	globalMu.Lock()
 	app := globalApp
 	globalApp = nil
+	globalMu.Unlock()
 	if app != nil {
-		app.Shutdown()
+		app.Close()
 	}
 	C.clear_host_api()
-	globalMu.Unlock()
 }
 
 func currentApp() *pluginapp.App {
@@ -198,9 +211,11 @@ func currentApp() *pluginapp.App {
 	return globalApp
 }
 
-type nativeHostCaller struct{}
+type nativeHostCaller struct {
+	snapshot C.cliproxy_host_api
+}
 
-func (nativeHostCaller) Call(ctx context.Context, method string, request []byte) ([]byte, error) {
+func (c nativeHostCaller) Call(ctx context.Context, method string, request []byte) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -209,16 +224,10 @@ func (nativeHostCaller) Call(ctx context.Context, method string, request []byte)
 	}
 
 	// The CPA ABI is synchronous and has no per-call cancellation or timeout
-	// field. Snapshot the host callbacks while protected, then release the
-	// global lock before entering host code so a synchronous callback can
-	// re-enter plugin shutdown or initialization without deadlocking. Context
-	// cancellation can only be observed before and after the host call. Linux
-	// integration tests must verify the host's own HTTP timeout behavior.
-	var snapshot C.cliproxy_host_api
-	globalMu.RLock()
-	available := globalApp != nil && C.snapshot_host_api(&snapshot) != 0
-	globalMu.RUnlock()
-	if !available {
+	// field. Each app owns the host snapshot captured during init, so in-flight
+	// management calls keep using their original host even across re-init.
+	snapshot := c.snapshot
+	if snapshot.call == nil || snapshot.free_buffer == nil {
 		return nil, errHostCallback
 	}
 
@@ -254,7 +263,21 @@ func (nativeHostCaller) Call(ctx context.Context, method string, request []byte)
 }
 
 func newHostClient(hostCallbackID string) *abi.Client {
-	return abi.NewClient(nativeHostCaller{}, hostCallbackID)
+	return newHostClientFactory(snapshotStoredHost())(hostCallbackID)
+}
+
+func newHostClientFactory(snapshot C.cliproxy_host_api) pluginapp.HostClientFactory {
+	return func(hostCallbackID string) *abi.Client {
+		return abi.NewClient(nativeHostCaller{snapshot: snapshot}, hostCallbackID)
+	}
+}
+
+func snapshotStoredHost() C.cliproxy_host_api {
+	var snapshot C.cliproxy_host_api
+	globalMu.RLock()
+	_ = C.snapshot_host_api(&snapshot)
+	globalMu.RUnlock()
+	return snapshot
 }
 
 func writeABIResponse(response *C.cliproxy_buffer, raw []byte) bool {
