@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"encoding/json"
+	"math"
+	"testing"
+)
 
 func TestDefaultsAndValidation(t *testing.T) {
 	cfg, err := Parse(map[string]any{}, nil)
@@ -147,4 +151,82 @@ func contains(haystack, needle string) bool {
 		}
 	}
 	return false
+}
+
+func TestStrictTypedReadersRejectInvalidValues(t *testing.T) {
+	bad := []map[string]any{
+		{"concurrency": "4"},
+		{"concurrency": 1.2},
+		{"concurrency": true},
+		{"concurrency": nil},
+		{"concurrency": uint64(^uint64(0))},
+		{"low_threshold": "1.5"},
+		{"low_threshold": true},
+	}
+	for _, raw := range bad {
+		if _, err := Parse(raw, nil); err == nil {
+			t.Fatalf("expected typed parse error for %#v", raw)
+		}
+	}
+	cfg, err := Parse(map[string]any{"concurrency": 4.0, "retry_attempts": 0, "low_threshold": 1, "recovery_threshold": 1.1}, nil)
+	if err != nil {
+		t.Fatalf("integral float and numeric thresholds should parse: %v", err)
+	}
+	if cfg.Concurrency != 4 || cfg.RetryAttempts != 0 {
+		t.Fatalf("unexpected parsed config: %+v", cfg)
+	}
+}
+
+func TestRangeValidation(t *testing.T) {
+	bad := []map[string]any{
+		{"concurrency": 0},
+		{"request_timeout_seconds": -1},
+		{"stale_after_seconds": 0},
+		{"reminder_seconds": 0},
+		{"failure_alert_count": 0},
+		{"retry_attempts": -1},
+		{"state_path": ""},
+		{"low_threshold": 0},
+		{"low_threshold": 1.5, "recovery_threshold": 1.5},
+	}
+	for _, raw := range bad {
+		if _, err := Parse(raw, nil); err == nil {
+			t.Fatalf("expected range error for %#v", raw)
+		}
+	}
+	cfg, err := Parse(map[string]any{}, nil)
+	if err != nil {
+		t.Fatalf("defaults should parse: %v", err)
+	}
+	if cfg.StatePath == "" {
+		t.Fatalf("default state_path must be non-empty")
+	}
+}
+
+func TestSMTPPlainRecipientsRejected(t *testing.T) {
+	for _, key := range []string{"recipients", "recipient", "recipient_env"} {
+		_, err := Parse(map[string]any{"smtp": map[string]any{key: []any{"alerts@example.com"}}}, nil)
+		if err == nil {
+			t.Fatalf("expected smtp.%s rejection", key)
+		}
+	}
+}
+
+func TestJSONNumberAndNonFiniteValidation(t *testing.T) {
+	cfg, err := Parse(map[string]any{"concurrency": json.Number("4.0")}, nil)
+	if err != nil {
+		t.Fatalf("integral json.Number should parse: %v", err)
+	}
+	if cfg.Concurrency != 4 {
+		t.Fatalf("unexpected concurrency: %d", cfg.Concurrency)
+	}
+	for _, raw := range []map[string]any{
+		{"concurrency": json.Number("4.5")},
+		{"low_threshold": math.NaN()},
+		{"low_threshold": math.Inf(1)},
+	} {
+		if _, err := Parse(raw, nil); err == nil {
+			t.Fatalf("expected numeric validation error for %#v", raw)
+		}
+	}
 }

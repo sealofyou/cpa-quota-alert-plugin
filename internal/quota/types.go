@@ -204,14 +204,20 @@ func AggregateObservations(observations []AccountObservation, now time.Time) (Sn
 		}
 		if obs.Success {
 			successes++
-			total := round4(obs.WeightedRemaining)
-			snap.Total += total
-			snap.TotalByWindow[obs.Window] = round4(snap.TotalByWindow[obs.Window] + total)
+			snap.Total += obs.WeightedRemaining
+			snap.TotalByWindow[obs.Window] += obs.WeightedRemaining
 			breakdown := snap.Plans[obs.CanonicalPlan]
 			breakdown.Accounts++
-			breakdown.Remaining = round4(breakdown.Remaining + total)
+			breakdown.Remaining += obs.WeightedRemaining
 			snap.Plans[obs.CanonicalPlan] = breakdown
 		}
+	}
+	for window, total := range snap.TotalByWindow {
+		snap.TotalByWindow[window] = round4(total)
+	}
+	for plan, breakdown := range snap.Plans {
+		breakdown.Remaining = round4(breakdown.Remaining)
+		snap.Plans[plan] = breakdown
 	}
 	snap.Total = round4(snap.Total)
 	if len(snap.UnknownPlanCounts) > 0 {
@@ -264,7 +270,7 @@ func parseWindow(raw map[string]any, fallback string) (Window, error) {
 			return Window{}, errors.New("used_percent missing without reset-backed exhausted signal")
 		}
 	}
-	if used < 0 || used > 100 {
+	if math.IsNaN(used) || math.IsInf(used, 0) || used < 0 || used > 100 {
 		return Window{}, fmt.Errorf("used_percent %.4f outside 0..100", used)
 	}
 	return Window{
@@ -276,15 +282,18 @@ func parseWindow(raw map[string]any, fallback string) (Window, error) {
 }
 
 func windowName(raw map[string]any, fallback string) (string, error) {
-	seconds, ok := getFloat(raw, "limit_window_seconds", "limitWindowSeconds", "window_seconds", "windowSeconds", "duration", "duration_seconds", "durationSeconds")
+	seconds, ok, err := getDurationSeconds(raw, "limit_window_seconds", "limitWindowSeconds", "window_seconds", "windowSeconds", "duration", "duration_seconds", "durationSeconds")
+	if err != nil {
+		return "", err
+	}
 	if ok {
-		switch int(seconds) {
+		switch seconds {
 		case Window5hSeconds:
 			return Window5h, nil
 		case Window7dSeconds:
 			return Window7d, nil
 		default:
-			return "", fmt.Errorf("unsupported limit_window_seconds %.0f", seconds)
+			return "", fmt.Errorf("unsupported limit_window_seconds %d", seconds)
 		}
 	}
 	if fallback == Window5h || fallback == Window7d {
@@ -346,6 +355,54 @@ func round4(value float64) float64 {
 	return math.Round(value*10000) / 10000
 }
 
+func getDurationSeconds(raw map[string]any, keys ...string) (int, bool, error) {
+	for _, key := range keys {
+		value, ok := raw[key]
+		if !ok {
+			continue
+		}
+		seconds, err := durationSeconds(value)
+		if err != nil {
+			return 0, true, fmt.Errorf("%s must be a finite integral duration in seconds: %w", key, err)
+		}
+		return seconds, true, nil
+	}
+	return 0, false, nil
+}
+
+func durationSeconds(value any) (int, error) {
+	switch v := value.(type) {
+	case int:
+		return v, nil
+	case int64:
+		if v > int64(maxInt()) || v < int64(minInt()) {
+			return 0, errors.New("overflows int")
+		}
+		return int(v), nil
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) || math.Trunc(v) != v {
+			return 0, errors.New("must be finite and integral")
+		}
+		if v > float64(maxInt()) || v < float64(minInt()) {
+			return 0, errors.New("overflows int")
+		}
+		return int(v), nil
+	case json.Number:
+		parsed, err := v.Int64()
+		if err != nil {
+			return 0, errors.New("must be integral")
+		}
+		if parsed > int64(maxInt()) || parsed < int64(minInt()) {
+			return 0, errors.New("overflows int")
+		}
+		return int(parsed), nil
+	default:
+		return 0, fmt.Errorf("unsupported type %T", value)
+	}
+}
+
+func maxInt() int { return int(^uint(0) >> 1) }
+func minInt() int { return -maxInt() - 1 }
 func getObject(raw map[string]any, keys ...string) (map[string]any, bool) {
 	for _, key := range keys {
 		if value, ok := raw[key]; ok {

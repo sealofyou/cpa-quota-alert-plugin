@@ -35,7 +35,7 @@ func (OSFS) Open(name string) (File, error) { return os.Open(name) }
 func (OSFS) OpenFile(name string, flag int, perm os.FileMode) (File, error) {
 	return os.OpenFile(name, flag, perm)
 }
-func (OSFS) Rename(oldpath, newpath string) error { return os.Rename(oldpath, newpath) }
+func (OSFS) Rename(oldpath, newpath string) error { return replaceFile(oldpath, newpath) }
 func (OSFS) Remove(name string) error             { return os.Remove(name) }
 func (OSFS) Chmod(name string, mode os.FileMode) error {
 	return os.Chmod(name, mode)

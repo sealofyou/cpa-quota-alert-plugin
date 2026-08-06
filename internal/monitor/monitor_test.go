@@ -102,3 +102,36 @@ func countKind(events []Event, kind string) int {
 	}
 	return count
 }
+
+func TestEventIDsUniqueForSameKindAndTimestamp(t *testing.T) {
+	now := time.Date(2026, 8, 6, 0, 0, 0, 123, time.UTC)
+	st := State{}
+	appendEvent(&st, EventLowReminder, now, []string{"smtp"}, map[string]any{"total": 1.0})
+	appendEvent(&st, EventLowReminder, now, []string{"smtp"}, map[string]any{"total": 1.0})
+	if len(st.PendingEvents) != 2 {
+		t.Fatalf("expected two pending events: %+v", st)
+	}
+	if st.PendingEvents[0].ID == st.PendingEvents[1].ID {
+		t.Fatalf("same kind and timestamp events must have unique IDs: %s", st.PendingEvents[0].ID)
+	}
+	if st.EventSequence != 2 {
+		t.Fatalf("event sequence should be persisted and incremented: %+v", st)
+	}
+}
+func TestPlanChangedSummaryDeepCopied(t *testing.T) {
+	now := time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)
+	unknown := map[string]int{"enterprise": 1}
+	st := Evaluate(State{}, Input{Err: &quota.PlanChangedError{UnknownPlans: unknown}}, now)
+	unknown["enterprise"] = 99
+	unknown["other"] = 42
+	got := st.PendingEvents[0].Summary["unknown_plans"].(map[string]int)
+	if got["enterprise"] != 1 || got["other"] != 0 {
+		t.Fatalf("pending summary should not alias source map: %+v", got)
+	}
+	dry := DryRun(st, Input{Err: &quota.PlanChangedError{UnknownPlans: unknown}}, now.Add(time.Minute))
+	got["enterprise"] = 7
+	dryGot := dry.PendingEvents[0].Summary["unknown_plans"].(map[string]int)
+	if dryGot["enterprise"] != 1 {
+		t.Fatalf("dry-run state should deep-copy pending summaries: %+v", dryGot)
+	}
+}

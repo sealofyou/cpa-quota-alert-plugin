@@ -194,3 +194,20 @@ func (f faultFile) Chmod(mode os.FileMode) error {
 	}
 	return f.File.Chmod(mode)
 }
+
+func TestOSFSSaveTwiceReplacesExistingState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := Save(path, monitor.State{LowActive: true, LastValidTotal: 1}); err != nil {
+		t.Fatalf("first Save: %v", err)
+	}
+	if err := Save(path, monitor.State{LowActive: false, LastValidTotal: 2}); err != nil {
+		t.Fatalf("second Save should replace existing state: %v", err)
+	}
+	st, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if st.LowActive || st.LastValidTotal != 2 {
+		t.Fatalf("second state not persisted: %+v", st)
+	}
+}

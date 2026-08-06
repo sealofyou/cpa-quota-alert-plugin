@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"slices"
@@ -15,7 +17,10 @@ const (
 	Window7d = "7d"
 )
 
-const DefaultQuotaURL = "https://chatgpt.com/backend-api/wham/usage"
+const (
+	DefaultQuotaURL  = "https://chatgpt.com/backend-api/wham/usage"
+	DefaultStatePath = "cpa-quota-alert-state.json"
+)
 
 type Getenv func(string) string
 
@@ -41,8 +46,6 @@ type SMTPConfig struct {
 	PasswordEnv     string
 	RecipientsEnv   string
 	FromEnv         string
-	Recipients      []string
-	RecipientEnv    string
 	NonSecretLabels map[string]string
 }
 
@@ -96,27 +99,51 @@ func Parse(raw map[string]any, getenv Getenv) (Config, error) {
 		RecoveryThreshold:     1.6,
 		ReminderSeconds:       86400,
 		FailureAlertCount:     3,
+		StatePath:             DefaultStatePath,
 		QuotaURL:              DefaultQuotaURL,
 		AllowedQuotaHosts:     PlanSet{"chatgpt.com": {}},
 		IgnoredPlans:          PlanSet{"free": {}},
 		TerminalErrorCodes:    PlanSet{},
 	}
 
-	cfg.DryRun = boolValue(raw, "dry_run", cfg.DryRun)
-	cfg.Concurrency = intValue(raw, "concurrency", cfg.Concurrency)
-	cfg.RequestTimeoutSeconds = intValue(raw, "request_timeout_seconds", cfg.RequestTimeoutSeconds)
-	cfg.RetryAttempts = intValue(raw, "retry_attempts", cfg.RetryAttempts)
-	cfg.StaleAfterSeconds = intValue(raw, "stale_after_seconds", cfg.StaleAfterSeconds)
-	cfg.LowThreshold = floatValue(raw, "low_threshold", cfg.LowThreshold)
-	cfg.RecoveryThreshold = floatValue(raw, "recovery_threshold", cfg.RecoveryThreshold)
-	cfg.ReminderSeconds = intValue(raw, "reminder_seconds", cfg.ReminderSeconds)
-	cfg.FailureAlertCount = intValue(raw, "failure_alert_count", cfg.FailureAlertCount)
-	cfg.StatePath = stringValue(raw, "state_path", cfg.StatePath)
-	cfg.QuotaURL = stringValue(raw, "quota_url", cfg.QuotaURL)
-
-	if cfg.RecoveryThreshold <= cfg.LowThreshold {
-		return Config{}, errors.New("recovery_threshold must be greater than low_threshold")
+	var err error
+	if cfg.DryRun, err = readBool(raw, "dry_run", cfg.DryRun); err != nil {
+		return Config{}, err
 	}
+	if cfg.Concurrency, err = readInt(raw, "concurrency", cfg.Concurrency); err != nil {
+		return Config{}, err
+	}
+	if cfg.RequestTimeoutSeconds, err = readInt(raw, "request_timeout_seconds", cfg.RequestTimeoutSeconds); err != nil {
+		return Config{}, err
+	}
+	if cfg.RetryAttempts, err = readInt(raw, "retry_attempts", cfg.RetryAttempts); err != nil {
+		return Config{}, err
+	}
+	if cfg.StaleAfterSeconds, err = readInt(raw, "stale_after_seconds", cfg.StaleAfterSeconds); err != nil {
+		return Config{}, err
+	}
+	if cfg.LowThreshold, err = readFloat(raw, "low_threshold", cfg.LowThreshold); err != nil {
+		return Config{}, err
+	}
+	if cfg.RecoveryThreshold, err = readFloat(raw, "recovery_threshold", cfg.RecoveryThreshold); err != nil {
+		return Config{}, err
+	}
+	if cfg.ReminderSeconds, err = readInt(raw, "reminder_seconds", cfg.ReminderSeconds); err != nil {
+		return Config{}, err
+	}
+	if cfg.FailureAlertCount, err = readInt(raw, "failure_alert_count", cfg.FailureAlertCount); err != nil {
+		return Config{}, err
+	}
+	if cfg.StatePath, err = readString(raw, "state_path", cfg.StatePath); err != nil {
+		return Config{}, err
+	}
+	if cfg.QuotaURL, err = readString(raw, "quota_url", cfg.QuotaURL); err != nil {
+		return Config{}, err
+	}
+	if err := validateRanges(cfg); err != nil {
+		return Config{}, err
+	}
+
 	if hosts, ok := raw["allowed_quota_hosts"]; ok {
 		cfg.AllowedQuotaHosts = parseSet(hosts)
 	}
@@ -127,10 +154,16 @@ func Parse(raw map[string]any, getenv Getenv) (Config, error) {
 		cfg.TerminalErrorCodes = parseSet(terminal)
 	}
 	if smtpRaw, ok := objectValue(raw["smtp"]); ok {
-		cfg.SMTP = parseSMTP(smtpRaw)
+		cfg.SMTP, err = parseSMTP(smtpRaw)
+		if err != nil {
+			return Config{}, err
+		}
 	}
 	if webhookRaw, ok := objectValue(raw["webhook"]); ok {
-		cfg.Webhook = parseWebhook(webhookRaw)
+		cfg.Webhook, err = parseWebhook(webhookRaw)
+		if err != nil {
+			return Config{}, err
+		}
 	}
 	if err := validateNotificationEnv(cfg, getenv); err != nil {
 		return Config{}, err
@@ -151,6 +184,34 @@ func Parse(raw map[string]any, getenv Getenv) (Config, error) {
 	cfg.PlanRules = rules
 	cfg.Aliases = aliases
 	return cfg, nil
+}
+
+func validateRanges(cfg Config) error {
+	positive := map[string]int{
+		"concurrency":             cfg.Concurrency,
+		"request_timeout_seconds": cfg.RequestTimeoutSeconds,
+		"stale_after_seconds":     cfg.StaleAfterSeconds,
+		"reminder_seconds":        cfg.ReminderSeconds,
+		"failure_alert_count":     cfg.FailureAlertCount,
+	}
+	for field, value := range positive {
+		if value <= 0 {
+			return fmt.Errorf("%s must be greater than 0", field)
+		}
+	}
+	if cfg.RetryAttempts < 0 {
+		return errors.New("retry_attempts must be greater than or equal to 0")
+	}
+	if strings.TrimSpace(cfg.StatePath) == "" {
+		return errors.New("state_path must be non-empty")
+	}
+	if !isFinite(cfg.LowThreshold) || cfg.LowThreshold <= 0 {
+		return errors.New("low_threshold must be finite and greater than 0")
+	}
+	if !isFinite(cfg.RecoveryThreshold) || cfg.RecoveryThreshold <= cfg.LowThreshold {
+		return errors.New("recovery_threshold must be finite and greater than low_threshold")
+	}
+	return nil
 }
 
 func validateNotificationEnv(cfg Config, getenv Getenv) error {
@@ -182,6 +243,7 @@ func requireEnv(getenv Getenv, label, name string) error {
 	}
 	return nil
 }
+
 func parseRules(raw any, ignored PlanSet) (map[string]PlanRule, map[string]string, error) {
 	var candidates []any
 	if raw == nil {
@@ -203,18 +265,34 @@ func parseRules(raw any, ignored PlanSet) (map[string]PlanRule, map[string]strin
 		if !ok {
 			return nil, nil, fmt.Errorf("plan_rules[%d] must be an object", i)
 		}
-		name := NormalizePlan(stringValue(obj, "name", stringValue(obj, "canonical_name", "")))
+		name, err := readString(obj, "name", "")
+		if err != nil {
+			return nil, nil, err
+		}
+		if name == "" {
+			name, err = readString(obj, "canonical_name", "")
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		name = NormalizePlan(name)
 		if name == "" {
 			return nil, nil, fmt.Errorf("plan_rules[%d].name is required", i)
 		}
 		if ignored.Contains(name) {
 			return nil, nil, fmt.Errorf("plan rule %q conflicts with ignored_plans", name)
 		}
-		window := stringValue(obj, "window", "")
+		window, err := readString(obj, "window", "")
+		if err != nil {
+			return nil, nil, err
+		}
 		if window != Window5h && window != Window7d {
 			return nil, nil, fmt.Errorf("plan rule %q window must be 5h or 7d", name)
 		}
-		weight := floatValue(obj, "weight", 0)
+		weight, err := readFloat(obj, "weight", 0)
+		if err != nil {
+			return nil, nil, err
+		}
 		if weight <= 0 {
 			return nil, nil, fmt.Errorf("plan rule %q weight must be greater than 0", name)
 		}
@@ -225,7 +303,11 @@ func parseRules(raw any, ignored PlanSet) (map[string]PlanRule, map[string]strin
 				return nil, nil, fmt.Errorf("plan rule %q aliases must be an array", name)
 			}
 			for _, aliasRaw := range aliasValues {
-				alias := NormalizePlan(asString(aliasRaw))
+				alias, ok := aliasRaw.(string)
+				if !ok {
+					return nil, nil, fmt.Errorf("plan rule %q aliases must contain only strings", name)
+				}
+				alias = NormalizePlan(alias)
 				if alias != "" {
 					rule.Aliases = append(rule.Aliases, alias)
 				}
@@ -257,31 +339,62 @@ func NormalizePlan(value string) string {
 	return replacer.Replace(lower)
 }
 
-func parseSMTP(raw map[string]any) SMTPConfig {
-	return SMTPConfig{
-		Enabled:         boolValue(raw, "enabled", false),
-		Host:            stringValue(raw, "host", ""),
-		Port:            intValue(raw, "port", 0),
-		UsernameEnv:     firstString(raw, "username_env", "smtp_username_env"),
-		PasswordEnv:     firstString(raw, "password_env", "smtp_password_env"),
-		RecipientsEnv:   firstString(raw, "recipients_env", "smtp_recipients_env"),
-		FromEnv:         firstString(raw, "from_env", "smtp_from_env"),
-		RecipientEnv:    firstString(raw, "recipient_env"),
-		Recipients:      stringSlice(raw["recipients"]),
-		NonSecretLabels: stringMap(raw["metadata"]),
+func parseSMTP(raw map[string]any) (SMTPConfig, error) {
+	for _, forbidden := range []string{"recipients", "recipient", "recipient_env"} {
+		if _, ok := raw[forbidden]; ok {
+			return SMTPConfig{}, fmt.Errorf("smtp.%s is not allowed; use smtp.recipients_env", forbidden)
+		}
 	}
+	var err error
+	cfg := SMTPConfig{}
+	if cfg.Enabled, err = readBool(raw, "enabled", false); err != nil {
+		return SMTPConfig{}, err
+	}
+	if cfg.Host, err = readString(raw, "host", ""); err != nil {
+		return SMTPConfig{}, err
+	}
+	if cfg.Port, err = readInt(raw, "port", 0); err != nil {
+		return SMTPConfig{}, err
+	}
+	if cfg.UsernameEnv, err = firstString(raw, "username_env", "smtp_username_env"); err != nil {
+		return SMTPConfig{}, err
+	}
+	if cfg.PasswordEnv, err = firstString(raw, "password_env", "smtp_password_env"); err != nil {
+		return SMTPConfig{}, err
+	}
+	if cfg.RecipientsEnv, err = firstString(raw, "recipients_env", "smtp_recipients_env"); err != nil {
+		return SMTPConfig{}, err
+	}
+	if cfg.FromEnv, err = firstString(raw, "from_env", "smtp_from_env"); err != nil {
+		return SMTPConfig{}, err
+	}
+	cfg.NonSecretLabels = stringMap(raw["metadata"])
+	return cfg, nil
 }
 
-func parseWebhook(raw map[string]any) WebhookConfig {
-	return WebhookConfig{
-		Enabled:            boolValue(raw, "enabled", false),
-		URLenv:             firstString(raw, "url_env", "webhook_url_env"),
-		HeaderEnv:          firstString(raw, "header_env", "webhook_header_env"),
-		URLRuntimeEnv:      firstString(raw, "runtime_url_env"),
-		AuthHeaderEnv:      firstString(raw, "auth_header_env"),
-		NonSecretMetadata:  stringMap(raw["metadata"]),
-		ExtraHeaderNameEnv: firstString(raw, "extra_header_name_env"),
+func parseWebhook(raw map[string]any) (WebhookConfig, error) {
+	var err error
+	cfg := WebhookConfig{}
+	if cfg.Enabled, err = readBool(raw, "enabled", false); err != nil {
+		return WebhookConfig{}, err
 	}
+	if cfg.URLenv, err = firstString(raw, "url_env", "webhook_url_env"); err != nil {
+		return WebhookConfig{}, err
+	}
+	if cfg.HeaderEnv, err = firstString(raw, "header_env", "webhook_header_env"); err != nil {
+		return WebhookConfig{}, err
+	}
+	if cfg.URLRuntimeEnv, err = readString(raw, "runtime_url_env", ""); err != nil {
+		return WebhookConfig{}, err
+	}
+	if cfg.AuthHeaderEnv, err = readString(raw, "auth_header_env", ""); err != nil {
+		return WebhookConfig{}, err
+	}
+	if cfg.ExtraHeaderNameEnv, err = readString(raw, "extra_header_name_env", ""); err != nil {
+		return WebhookConfig{}, err
+	}
+	cfg.NonSecretMetadata = stringMap(raw["metadata"])
+	return cfg, nil
 }
 
 func findPlainSecret(raw any, path []string) string {
@@ -332,15 +445,15 @@ func parsePlanSet(raw any) PlanSet { return parseSet(raw) }
 func stringSlice(raw any) []string {
 	values, ok := arrayValue(raw)
 	if !ok {
-		if s := asString(raw); s != "" {
-			return []string{s}
+		if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
+			return []string{strings.TrimSpace(s)}
 		}
 		return nil
 	}
 	out := make([]string, 0, len(values))
 	for _, value := range values {
-		if s := asString(value); s != "" {
-			out = append(out, s)
+		if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
+			out = append(out, strings.TrimSpace(s))
 		}
 	}
 	return out
@@ -353,100 +466,189 @@ func stringMap(raw any) map[string]string {
 	}
 	out := map[string]string{}
 	for key, value := range obj {
-		out[key] = asString(value)
+		if s, ok := value.(string); ok {
+			out[key] = strings.TrimSpace(s)
+		}
 	}
 	return out
 }
 
-func boolValue(raw map[string]any, key string, fallback bool) bool {
+func readBool(raw map[string]any, key string, fallback bool) (bool, error) {
 	value, ok := raw[key]
 	if !ok {
-		return fallback
+		return fallback, nil
 	}
-	switch v := value.(type) {
-	case bool:
-		return v
-	case string:
-		parsed, err := strconv.ParseBool(v)
-		if err == nil {
-			return parsed
-		}
+	b, ok := value.(bool)
+	if !ok {
+		return false, fmt.Errorf("%s must be a boolean", key)
 	}
-	return fallback
+	return b, nil
 }
 
-func intValue(raw map[string]any, key string, fallback int) int {
+func readInt(raw map[string]any, key string, fallback int) (int, error) {
 	value, ok := raw[key]
 	if !ok {
-		return fallback
+		return fallback, nil
 	}
-	switch v := value.(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	case string:
-		parsed, err := strconv.Atoi(v)
-		if err == nil {
-			return parsed
-		}
+	parsed, err := strictInt(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
 	}
-	return fallback
+	return parsed, nil
 }
 
-func floatValue(raw map[string]any, key string, fallback float64) float64 {
+func readFloat(raw map[string]any, key string, fallback float64) (float64, error) {
 	value, ok := raw[key]
 	if !ok {
-		return fallback
+		return fallback, nil
 	}
-	switch v := value.(type) {
-	case float64:
-		return v
-	case float32:
-		return float64(v)
-	case int:
-		return float64(v)
-	case int64:
-		return float64(v)
-	case string:
-		parsed, err := strconv.ParseFloat(v, 64)
-		if err == nil {
-			return parsed
-		}
+	parsed, err := strictFloat(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a finite number: %w", key, err)
 	}
-	return fallback
+	return parsed, nil
 }
 
-func stringValue(raw map[string]any, key, fallback string) string {
-	if value, ok := raw[key]; ok {
-		if s := asString(value); s != "" {
-			return s
-		}
+func readString(raw map[string]any, key, fallback string) (string, error) {
+	value, ok := raw[key]
+	if !ok {
+		return fallback, nil
 	}
-	return fallback
+	text, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("%s must be a string", key)
+	}
+	return strings.TrimSpace(text), nil
 }
 
-func firstString(raw map[string]any, keys ...string) string {
+func firstString(raw map[string]any, keys ...string) (string, error) {
 	for _, key := range keys {
-		if value := stringValue(raw, key, ""); value != "" {
-			return value
+		if _, ok := raw[key]; ok {
+			return readString(raw, key, "")
 		}
 	}
-	return ""
+	return "", nil
 }
 
-func asString(raw any) string {
-	switch v := raw.(type) {
-	case string:
-		return strings.TrimSpace(v)
-	case fmt.Stringer:
-		return strings.TrimSpace(v.String())
+func strictInt(value any) (int, error) {
+	var n int64
+	switch v := value.(type) {
+	case int:
+		return v, nil
+	case int8:
+		return int(v), nil
+	case int16:
+		return int(v), nil
+	case int32:
+		return int(v), nil
+	case int64:
+		n = v
+	case uint:
+		if uint64(v) > uint64(maxInt()) {
+			return 0, errors.New("overflows int")
+		}
+		return int(v), nil
+	case uint8:
+		return int(v), nil
+	case uint16:
+		return int(v), nil
+	case uint32:
+		if uint64(v) > uint64(maxInt()) {
+			return 0, errors.New("overflows int")
+		}
+		return int(v), nil
+	case uint64:
+		if v > uint64(maxInt()) {
+			return 0, errors.New("overflows int")
+		}
+		return int(v), nil
+	case float64:
+		if !isFinite(v) || math.Trunc(v) != v {
+			return 0, errors.New("must be finite and integral")
+		}
+		if v < float64(minInt()) || v > float64(maxInt()) {
+			return 0, errors.New("overflows int")
+		}
+		return int(v), nil
+	case float32:
+		f := float64(v)
+		if !isFinite(f) || math.Trunc(f) != f {
+			return 0, errors.New("must be finite and integral")
+		}
+		if f < float64(minInt()) || f > float64(maxInt()) {
+			return 0, errors.New("overflows int")
+		}
+		return int(f), nil
+	case json.Number:
+		parsed, err := strconv.ParseFloat(v.String(), 64)
+		if err != nil || !isFinite(parsed) || math.Trunc(parsed) != parsed {
+			return 0, errors.New("must be integral")
+		}
+		if parsed < float64(minInt()) || parsed > float64(maxInt()) {
+			return 0, errors.New("overflows int")
+		}
+		return int(parsed), nil
+	case nil:
+		return 0, errors.New("is required when present")
 	default:
-		return ""
+		return 0, fmt.Errorf("unsupported type %T", value)
 	}
+	if n < int64(minInt()) || n > int64(maxInt()) {
+		return 0, errors.New("overflows int")
+	}
+	return int(n), nil
 }
+
+func strictFloat(value any) (float64, error) {
+	var f float64
+	switch v := value.(type) {
+	case float64:
+		f = v
+	case float32:
+		f = float64(v)
+	case int:
+		f = float64(v)
+	case int8:
+		f = float64(v)
+	case int16:
+		f = float64(v)
+	case int32:
+		f = float64(v)
+	case int64:
+		f = float64(v)
+	case uint:
+		f = float64(v)
+	case uint8:
+		f = float64(v)
+	case uint16:
+		f = float64(v)
+	case uint32:
+		f = float64(v)
+	case uint64:
+		f = float64(v)
+	case json.Number:
+		parsed, err := strconv.ParseFloat(v.String(), 64)
+		if err != nil {
+			return 0, err
+		}
+		f = parsed
+	case nil:
+		return 0, errors.New("is required when present")
+	default:
+		return 0, fmt.Errorf("unsupported type %T", value)
+	}
+	if !isFinite(f) {
+		return 0, errors.New("must be finite")
+	}
+	return f, nil
+}
+
+func isFinite(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func maxInt() int { return int(^uint(0) >> 1) }
+func minInt() int { return -maxInt() - 1 }
 
 func objectValue(raw any) (map[string]any, bool) {
 	value, ok := raw.(map[string]any)

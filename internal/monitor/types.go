@@ -34,6 +34,7 @@ type State struct {
 	LastErrorCode           string           `json:"last_error_code,omitempty"`
 	PendingEvents           []Event          `json:"pending_events,omitempty"`
 	DeliveredEvents         map[string]Event `json:"delivered_events,omitempty"`
+	EventSequence           int64            `json:"event_sequence,omitempty"`
 }
 
 type Event struct {
@@ -80,9 +81,9 @@ func Evaluate(current State, input Input, now time.Time) State {
 		next.LastErrorCode = ""
 		if !next.PlanChangedActive {
 			next.PlanChangedActive = true
-			next.PendingEvents = append(next.PendingEvents, newEvent(EventPlanChanged, now, input.Channels, map[string]any{
+			appendEvent(&next, EventPlanChanged, now, input.Channels, map[string]any{
 				"unknown_plans": planChanged.UnknownPlans,
-			}))
+			})
 		}
 		return next
 	}
@@ -92,10 +93,10 @@ func Evaluate(current State, input Input, now time.Time) State {
 		next.LastErrorCode = stableErrorCode(input.Err)
 		if next.ConsecutiveFailures >= input.FailureAlertCount && !next.ErrorActive {
 			next.ErrorActive = true
-			next.PendingEvents = append(next.PendingEvents, newEvent(EventDataError, now, input.Channels, map[string]any{
+			appendEvent(&next, EventDataError, now, input.Channels, map[string]any{
 				"consecutive_failures": next.ConsecutiveFailures,
 				"error_code":           next.LastErrorCode,
-			}))
+			})
 		}
 		return next
 	}
@@ -120,22 +121,16 @@ func Evaluate(current State, input Input, now time.Time) State {
 	case total < input.LowThreshold:
 		if !next.LowActive {
 			next.LowActive = true
-			next.PendingEvents = append(next.PendingEvents, newEvent(EventLow, now, input.Channels, map[string]any{
-				"total": total,
-			}))
+			appendEvent(&next, EventLow, now, input.Channels, map[string]any{"total": total})
 		} else if !next.LastLowDeliveredAt.IsZero() && now.Sub(next.LastLowDeliveredAt) >= time.Duration(input.ReminderSeconds)*time.Second {
 			if !hasPendingKind(next.PendingEvents, EventLowReminder) {
-				next.PendingEvents = append(next.PendingEvents, newEvent(EventLowReminder, now, input.Channels, map[string]any{
-					"total": total,
-				}))
+				appendEvent(&next, EventLowReminder, now, input.Channels, map[string]any{"total": total})
 			}
 		}
 	case total >= input.RecoveryThreshold:
 		if next.LowActive {
 			next.LowActive = false
-			next.PendingEvents = append(next.PendingEvents, newEvent(EventRecovery, now, input.Channels, map[string]any{
-				"total": total,
-			}))
+			appendEvent(&next, EventRecovery, now, input.Channels, map[string]any{"total": total})
 		}
 	default:
 	}
@@ -175,7 +170,12 @@ func DryRun(current State, input Input, now time.Time) State {
 	return Evaluate(cloneState(current), input, now)
 }
 
-func newEvent(kind string, now time.Time, channels []string, summary map[string]any) Event {
+func appendEvent(state *State, kind string, now time.Time, channels []string, summary map[string]any) {
+	state.EventSequence++
+	state.PendingEvents = append(state.PendingEvents, newEvent(kind, now, state.EventSequence, channels, summary))
+}
+
+func newEvent(kind string, now time.Time, sequence int64, channels []string, summary map[string]any) Event {
 	delivery := map[string]string{}
 	for _, channel := range channels {
 		channel = strings.TrimSpace(channel)
@@ -183,12 +183,12 @@ func newEvent(kind string, now time.Time, channels []string, summary map[string]
 			delivery[channel] = "pending"
 		}
 	}
-	id := stableEventID(kind, now, summary)
-	return Event{ID: id, Kind: kind, CreatedAt: now.UTC(), Summary: summary, Delivery: delivery}
+	id := stableEventID(kind, now, sequence, summary)
+	return Event{ID: id, Kind: kind, CreatedAt: now.UTC(), Summary: cloneSummary(summary), Delivery: delivery}
 }
 
-func stableEventID(kind string, now time.Time, summary map[string]any) string {
-	hash := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%v", kind, now.UTC().Format(time.RFC3339), summary)))
+func stableEventID(kind string, now time.Time, sequence int64, summary map[string]any) string {
+	hash := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%d|%v", kind, now.UTC().Format(time.RFC3339Nano), sequence, summary)))
 	return kind + "-" + hex.EncodeToString(hash[:8])
 }
 
@@ -258,9 +258,34 @@ func cloneSummary(in map[string]any) map[string]any {
 	}
 	out := map[string]any{}
 	for key, value := range in {
-		out[key] = value
+		out[key] = cloneValue(value)
 	}
 	return out
+}
+
+func cloneValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		return cloneSummary(v)
+	case map[string]int:
+		out := map[string]int{}
+		for key, item := range v {
+			out[key] = item
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = cloneValue(item)
+		}
+		return out
+	case []string:
+		return append([]string(nil), v...)
+	case []int:
+		return append([]int(nil), v...)
+	default:
+		return v
+	}
 }
 
 func cloneStringMap(in map[string]string) map[string]string {

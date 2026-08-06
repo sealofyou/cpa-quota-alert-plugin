@@ -1,7 +1,9 @@
 package quota
 
 import (
+	"encoding/json"
 	"errors"
+	"math"
 	"testing"
 	"time"
 )
@@ -153,5 +155,30 @@ func TestExhaustionInferenceRequiresResetInfo(t *testing.T) {
 		if q.Windows[Window7d].RemainingPercent != 0 {
 			t.Fatalf("expected zero remaining: %+v", q.Windows[Window7d])
 		}
+	}
+}
+
+func TestDurationRejectsNonFiniteFractionalAndOverflow(t *testing.T) {
+	bad := []any{18000.5, json.Number("18000.5"), math.NaN(), math.Inf(1), float64(^uint(0)) * 4}
+	for _, duration := range bad {
+		_, err := parseWindow(map[string]any{"used_percent": 1, "duration": duration}, "")
+		if err == nil {
+			t.Fatalf("expected duration error for %#v", duration)
+		}
+	}
+}
+
+func TestAggregateRoundsAfterAccumulatingRawValues(t *testing.T) {
+	inputs := []AccountInput{
+		{Enabled: true, Body: []byte(`{"plan_type":"plus","rate_limit":{"secondary":{"used_percent":66.6667,"limit_window_seconds":604800}}}`)},
+		{Enabled: true, Body: []byte(`{"plan_type":"plus","rate_limit":{"secondary":{"used_percent":66.6667,"limit_window_seconds":604800}}}`)},
+		{Enabled: true, Body: []byte(`{"plan_type":"plus","rate_limit":{"secondary":{"used_percent":66.6667,"limit_window_seconds":604800}}}`)},
+	}
+	snap, err := Aggregate(inputs, testRules(), time.Now())
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	if snap.TotalByWindow[Window7d] != 1 || snap.Plans["plus"].Remaining != 1 || snap.Total != 1 {
+		t.Fatalf("expected final-rounding total 1.0000, got %+v", snap)
 	}
 }
