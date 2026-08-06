@@ -1,0 +1,4 @@
+[Service]
+EnvironmentFile=/etc/cpa-quota-alert-plugin/plugin.env
+StateDirectory=cpa-quota-alert-plugin
+StateDirectoryMode=0700

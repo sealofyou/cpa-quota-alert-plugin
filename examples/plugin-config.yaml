@@ -1,0 +1,54 @@
+dry_run: true
+concurrency: 4
+request_timeout_seconds: 45
+retry_attempts: 2
+stale_after_seconds: 900
+low_threshold: 1.5
+recovery_threshold: 1.6
+reminder_seconds: 86400
+failure_alert_count: 3
+state_path: /var/lib/cpa-quota-alert-plugin/state.json
+
+allowed_quota_hosts:
+  - chatgpt.com
+
+ignored_plans:
+  - free
+
+terminal_error_codes:
+  - token_invalidated
+  - token_revoked
+  - deactivated_workspace
+
+plan_rules:
+  - name: plus
+    aliases:
+      - plus
+      - chatgptplus
+    window: 7d
+    weight: 1
+  - name: team
+    aliases:
+      - team
+      - chatgptteam
+    window: 7d
+    weight: 1
+
+smtp:
+  enabled: true
+  host: smtp.example.com
+  port: 587
+  tls_mode: starttls
+  timeout_seconds: 10
+  username_env: CPA_QUOTA_ALERT_SMTP_USER
+  password_env: CPA_QUOTA_ALERT_SMTP_PASSWORD
+  recipients_env: CPA_QUOTA_ALERT_SMTP_TO
+  from_env: CPA_QUOTA_ALERT_SMTP_FROM
+  from_name: CPA Quota Alert
+
+webhook:
+  enabled: false
+  method: POST
+  timeout_seconds: 10
+  url_env: CPA_QUOTA_ALERT_WEBHOOK_URL
+  auth_header_env: CPA_QUOTA_ALERT_WEBHOOK_AUTH

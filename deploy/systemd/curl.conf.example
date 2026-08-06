@@ -1,0 +1,13 @@
+# Install as /etc/cpa-quota-alert-plugin/curl.conf, owned by root, mode 0600.
+# This file is the only systemd-side location for the CPA Management key.
+
+url = "http://localhost:8080/v0/management/cpa-quota-alert/check"
+request = "POST"
+header = "Content-Type: application/json"
+header = "X-Management-Key: example-management-key"
+data = "{}"
+fail
+silent
+show-error
+connect-timeout = 5
+max-time = 30
