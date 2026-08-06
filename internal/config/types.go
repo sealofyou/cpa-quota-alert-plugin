@@ -53,24 +53,30 @@ func (s StringSet) Contains(value string) bool {
 }
 
 type SMTPConfig struct {
-	Enabled         bool
-	Host            string
-	Port            int
-	UsernameEnv     string
-	PasswordEnv     string
-	RecipientsEnv   string
-	FromEnv         string
+	Enabled        bool
+	Host           string
+	Port           int
+	TLSMode        string
+	TimeoutSeconds int
+	UsernameEnv    string
+	PasswordEnv    string
+	RecipientsEnv  string
+	FromEnv        string
+	FromName       string
+
+	// Kept for clone compatibility with adjacent packages; config parsing no longer accepts metadata here.
 	NonSecretLabels map[string]string
 }
 
 type WebhookConfig struct {
-	Enabled            bool
-	URLenv             string
-	HeaderEnv          string
-	URLRuntimeEnv      string
-	AuthHeaderEnv      string
-	NonSecretMetadata  map[string]string
-	ExtraHeaderNameEnv string
+	Enabled        bool
+	Method         string
+	TimeoutSeconds int
+	URLEnv         string
+	AuthHeaderEnv  string
+
+	// Kept for clone compatibility with adjacent packages; config parsing no longer accepts metadata here.
+	NonSecretMetadata map[string]string
 }
 
 type Config struct {
@@ -179,13 +185,21 @@ func Parse(raw map[string]any, getenv Getenv) (Config, error) {
 		}
 		cfg.TerminalErrorCodes = parsed
 	}
-	if smtpRaw, ok := objectValue(raw["smtp"]); ok {
+	if smtpValue, exists := raw["smtp"]; exists {
+		smtpRaw, ok := objectValue(smtpValue)
+		if !ok {
+			return Config{}, errors.New("smtp must be an object")
+		}
 		cfg.SMTP, err = parseSMTP(smtpRaw)
 		if err != nil {
 			return Config{}, err
 		}
 	}
-	if webhookRaw, ok := objectValue(raw["webhook"]); ok {
+	if webhookValue, exists := raw["webhook"]; exists {
+		webhookRaw, ok := objectValue(webhookValue)
+		if !ok {
+			return Config{}, errors.New("webhook must be an object")
+		}
 		cfg.Webhook, err = parseWebhook(webhookRaw)
 		if err != nil {
 			return Config{}, err
@@ -241,19 +255,32 @@ func validateRanges(cfg Config) error {
 }
 
 func validateNotificationEnv(cfg Config, getenv Getenv) error {
+	type envRequirement struct {
+		label string
+		name  string
+	}
+	var requirements []envRequirement
 	if cfg.SMTP.Enabled {
-		if err := requireEnv(getenv, "smtp.password_env", cfg.SMTP.PasswordEnv); err != nil {
-			return err
-		}
-		if err := requireEnv(getenv, "smtp.recipients_env", cfg.SMTP.RecipientsEnv); err != nil {
+		requirements = append(requirements,
+			envRequirement{label: "smtp.username_env", name: cfg.SMTP.UsernameEnv},
+			envRequirement{label: "smtp.password_env", name: cfg.SMTP.PasswordEnv},
+			envRequirement{label: "smtp.recipients_env", name: cfg.SMTP.RecipientsEnv},
+			envRequirement{label: "smtp.from_env", name: cfg.SMTP.FromEnv},
+		)
+	}
+	if cfg.Webhook.Enabled {
+		requirements = append(requirements,
+			envRequirement{label: "webhook.url_env", name: cfg.Webhook.URLEnv},
+			envRequirement{label: "webhook.auth_header_env", name: cfg.Webhook.AuthHeaderEnv},
+		)
+	}
+	for _, item := range requirements {
+		if err := validateEnvName(item.label, item.name); err != nil {
 			return err
 		}
 	}
-	if cfg.Webhook.Enabled {
-		if err := requireEnv(getenv, "webhook.url_env", cfg.Webhook.URLenv); err != nil {
-			return err
-		}
-		if err := requireEnv(getenv, "webhook.auth_header_env", cfg.Webhook.AuthHeaderEnv); err != nil {
+	for _, item := range requirements {
+		if err := requireEnv(getenv, item.label, item.name); err != nil {
 			return err
 		}
 	}
@@ -261,13 +288,44 @@ func validateNotificationEnv(cfg Config, getenv Getenv) error {
 }
 
 func requireEnv(getenv Getenv, label, name string) error {
-	if strings.TrimSpace(name) == "" {
-		return fmt.Errorf("%s must name an environment variable when channel is enabled", label)
+	if err := validateEnvName(label, name); err != nil {
+		return err
 	}
 	if strings.TrimSpace(getenv(name)) == "" {
 		return fmt.Errorf("%s environment variable %q is required and must be non-empty", label, name)
 	}
 	return nil
+}
+
+func validateEnvName(label, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("%s must name an environment variable when channel is enabled", label)
+	}
+	if !isEnvName(name) {
+		return fmt.Errorf("%s must name a valid environment variable", label)
+	}
+	return nil
+}
+
+func isEnvName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if r > 127 {
+			return false
+		}
+		if i == 0 {
+			if r != '_' && (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') {
+				return false
+			}
+			continue
+		}
+		if r != '_' && (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func parseRules(raw any, ignored PlanSet) (map[string]PlanRule, map[string]string, error) {
@@ -366,13 +424,15 @@ func NormalizeHost(value string) string {
 }
 
 func parseSMTP(raw map[string]any) (SMTPConfig, error) {
-	for _, forbidden := range []string{"recipients", "recipient", "recipient_env"} {
-		if _, ok := raw[forbidden]; ok {
-			return SMTPConfig{}, fmt.Errorf("smtp.%s is not allowed; use smtp.recipients_env", forbidden)
-		}
+	allowed := map[string]struct{}{
+		"enabled": {}, "host": {}, "port": {}, "tls_mode": {}, "timeout_seconds": {},
+		"username_env": {}, "password_env": {}, "recipients_env": {}, "from_env": {}, "from_name": {},
+	}
+	if err := rejectUnknownFields(raw, "smtp", allowed); err != nil {
+		return SMTPConfig{}, err
 	}
 	var err error
-	cfg := SMTPConfig{}
+	cfg := SMTPConfig{TLSMode: "starttls", TimeoutSeconds: 10}
 	if cfg.Enabled, err = readBool(raw, "enabled", false); err != nil {
 		return SMTPConfig{}, err
 	}
@@ -382,44 +442,77 @@ func parseSMTP(raw map[string]any) (SMTPConfig, error) {
 	if cfg.Port, err = readInt(raw, "port", 0); err != nil {
 		return SMTPConfig{}, err
 	}
-	if cfg.UsernameEnv, err = firstString(raw, "username_env", "smtp_username_env"); err != nil {
+	if cfg.TLSMode, err = readString(raw, "tls_mode", cfg.TLSMode); err != nil {
 		return SMTPConfig{}, err
 	}
-	if cfg.PasswordEnv, err = firstString(raw, "password_env", "smtp_password_env"); err != nil {
+	if cfg.TimeoutSeconds, err = readInt(raw, "timeout_seconds", cfg.TimeoutSeconds); err != nil {
 		return SMTPConfig{}, err
 	}
-	if cfg.RecipientsEnv, err = firstString(raw, "recipients_env", "smtp_recipients_env"); err != nil {
+	if cfg.UsernameEnv, err = readString(raw, "username_env", ""); err != nil {
 		return SMTPConfig{}, err
 	}
-	if cfg.FromEnv, err = firstString(raw, "from_env", "smtp_from_env"); err != nil {
+	if cfg.PasswordEnv, err = readString(raw, "password_env", ""); err != nil {
 		return SMTPConfig{}, err
 	}
-	cfg.NonSecretLabels = stringMap(raw["metadata"])
+	if cfg.RecipientsEnv, err = readString(raw, "recipients_env", ""); err != nil {
+		return SMTPConfig{}, err
+	}
+	if cfg.FromEnv, err = readString(raw, "from_env", ""); err != nil {
+		return SMTPConfig{}, err
+	}
+	if cfg.FromName, err = readString(raw, "from_name", ""); err != nil {
+		return SMTPConfig{}, err
+	}
+	if cfg.Enabled {
+		if strings.TrimSpace(cfg.Host) == "" {
+			return SMTPConfig{}, errors.New("smtp.host is required when smtp is enabled")
+		}
+		if cfg.Port <= 0 || cfg.Port > 65535 {
+			return SMTPConfig{}, errors.New("smtp.port must be between 1 and 65535")
+		}
+		if cfg.TLSMode != "implicit_tls" && cfg.TLSMode != "starttls" {
+			return SMTPConfig{}, errors.New("smtp.tls_mode must be implicit_tls or starttls")
+		}
+		if cfg.TimeoutSeconds <= 0 {
+			return SMTPConfig{}, errors.New("smtp.timeout_seconds must be greater than 0")
+		}
+	}
 	return cfg, nil
 }
 
 func parseWebhook(raw map[string]any) (WebhookConfig, error) {
+	allowed := map[string]struct{}{
+		"enabled": {}, "method": {}, "timeout_seconds": {}, "url_env": {}, "auth_header_env": {},
+	}
+	if err := rejectUnknownFields(raw, "webhook", allowed); err != nil {
+		return WebhookConfig{}, err
+	}
 	var err error
-	cfg := WebhookConfig{}
+	cfg := WebhookConfig{Method: "POST", TimeoutSeconds: 10}
 	if cfg.Enabled, err = readBool(raw, "enabled", false); err != nil {
 		return WebhookConfig{}, err
 	}
-	if cfg.URLenv, err = firstString(raw, "url_env", "webhook_url_env"); err != nil {
+	if cfg.Method, err = readString(raw, "method", cfg.Method); err != nil {
 		return WebhookConfig{}, err
 	}
-	if cfg.HeaderEnv, err = firstString(raw, "header_env", "webhook_header_env"); err != nil {
+	cfg.Method = strings.ToUpper(cfg.Method)
+	if cfg.TimeoutSeconds, err = readInt(raw, "timeout_seconds", cfg.TimeoutSeconds); err != nil {
 		return WebhookConfig{}, err
 	}
-	if cfg.URLRuntimeEnv, err = readString(raw, "runtime_url_env", ""); err != nil {
+	if cfg.URLEnv, err = readString(raw, "url_env", ""); err != nil {
 		return WebhookConfig{}, err
 	}
 	if cfg.AuthHeaderEnv, err = readString(raw, "auth_header_env", ""); err != nil {
 		return WebhookConfig{}, err
 	}
-	if cfg.ExtraHeaderNameEnv, err = readString(raw, "extra_header_name_env", ""); err != nil {
-		return WebhookConfig{}, err
+	if cfg.Enabled {
+		if cfg.Method != "POST" && cfg.Method != "PUT" {
+			return WebhookConfig{}, errors.New("webhook.method must be POST or PUT")
+		}
+		if cfg.TimeoutSeconds <= 0 {
+			return WebhookConfig{}, errors.New("webhook.timeout_seconds must be greater than 0")
+		}
 	}
-	cfg.NonSecretMetadata = stringMap(raw["metadata"])
 	return cfg, nil
 }
 
@@ -447,12 +540,29 @@ func findPlainSecret(raw any, path []string) string {
 }
 
 func isForbiddenPlainSecretKey(key string) bool {
-	for _, forbidden := range []string{"smtp_password", "webhook_url", "auth_header"} {
-		if key == forbidden || (strings.Contains(key, forbidden) && !strings.HasSuffix(key, "_env")) {
+	if strings.HasSuffix(key, "_env") || key == "from_name" {
+		return false
+	}
+	for _, forbidden := range []string{"password", "username", "recipient", "recipients", "from"} {
+		if key == forbidden || key == "smtp_"+forbidden {
+			return true
+		}
+	}
+	for _, forbidden := range []string{"url", "auth_header", "header"} {
+		if key == forbidden || key == "webhook_"+forbidden {
 			return true
 		}
 	}
 	return false
+}
+
+func rejectUnknownFields(raw map[string]any, prefix string, allowed map[string]struct{}) error {
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("%s.%s is not allowed", prefix, key)
+		}
+	}
+	return nil
 }
 
 func parsePlanSet(raw any, field string) (PlanSet, error) {
