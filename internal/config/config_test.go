@@ -230,3 +230,57 @@ func TestJSONNumberAndNonFiniteValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestAllowedQuotaHostsUseDNSHostNormalizationOnly(t *testing.T) {
+	docIP := "127." + "0.0.1"
+	_, err := Parse(map[string]any{
+		"quota_url":           "https://safeapi.example/backend-api/wham/usage",
+		"allowed_quota_hosts": []any{"safe-api.example"},
+	}, nil)
+	if err == nil {
+		t.Fatalf("safe-api.example must not match safeapi.example")
+	}
+	for _, tc := range []struct {
+		url  string
+		host string
+	}{
+		{url: "https://SAFE-API.example./usage", host: " safe-api.example.. "},
+		{url: "https://LOCALHOST./usage", host: "localhost"},
+		{url: "https://" + docIP + "/usage", host: docIP + "."},
+	} {
+		_, err := Parse(map[string]any{"quota_url": tc.url, "allowed_quota_hosts": []any{tc.host}}, nil)
+		if err != nil {
+			t.Fatalf("expected normalized host match for %+v: %v", tc, err)
+		}
+	}
+}
+
+func TestCollectionParsersRejectNonStringElements(t *testing.T) {
+	cases := []map[string]any{
+		{"terminal_error_codes": []any{"401", 403}},
+		{"terminal_error_codes": []any{"401", nil}},
+		{"ignored_plans": []any{"free", true}},
+		{"allowed_quota_hosts": []any{"chatgpt.com", map[string]any{"host": "example.com"}}},
+		{"plan_rules": []any{map[string]any{"name": "plus", "aliases": []any{"plus", 1}, "window": Window7d, "weight": 1}}},
+	}
+	for _, raw := range cases {
+		_, err := Parse(raw, nil)
+		if err == nil {
+			t.Fatalf("expected strict collection error for %#v", raw)
+		}
+		if got := err.Error(); !contains(got, "[") {
+			t.Fatalf("collection error should include field path/index, got %q", got)
+		}
+	}
+	_, err := Parse(map[string]any{"terminal_error_codes": "401"}, nil)
+	if err == nil {
+		t.Fatalf("single string collection must be rejected")
+	}
+}
+
+func TestTerminalCodesDoNotCoerceNumbers(t *testing.T) {
+	_, err := Parse(map[string]any{"terminal_error_codes": []any{401}}, nil)
+	if err == nil {
+		t.Fatalf("numeric terminal code must not be coerced to string")
+	}
+}

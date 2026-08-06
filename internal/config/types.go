@@ -38,6 +38,20 @@ func (s PlanSet) Contains(plan string) bool {
 	return ok
 }
 
+type HostSet map[string]struct{}
+
+func (s HostSet) Contains(host string) bool {
+	_, ok := s[NormalizeHost(host)]
+	return ok
+}
+
+type StringSet map[string]struct{}
+
+func (s StringSet) Contains(value string) bool {
+	_, ok := s[strings.TrimSpace(value)]
+	return ok
+}
+
 type SMTPConfig struct {
 	Enabled         bool
 	Host            string
@@ -73,9 +87,9 @@ type Config struct {
 	PlanRules             map[string]PlanRule
 	Aliases               map[string]string
 	IgnoredPlans          PlanSet
-	TerminalErrorCodes    PlanSet
+	TerminalErrorCodes    StringSet
 	QuotaURL              string
-	AllowedQuotaHosts     PlanSet
+	AllowedQuotaHosts     HostSet
 	SMTP                  SMTPConfig
 	Webhook               WebhookConfig
 }
@@ -101,9 +115,9 @@ func Parse(raw map[string]any, getenv Getenv) (Config, error) {
 		FailureAlertCount:     3,
 		StatePath:             DefaultStatePath,
 		QuotaURL:              DefaultQuotaURL,
-		AllowedQuotaHosts:     PlanSet{"chatgpt.com": {}},
+		AllowedQuotaHosts:     HostSet{"chatgpt.com": {}},
 		IgnoredPlans:          PlanSet{"free": {}},
-		TerminalErrorCodes:    PlanSet{},
+		TerminalErrorCodes:    StringSet{},
 	}
 
 	var err error
@@ -145,13 +159,25 @@ func Parse(raw map[string]any, getenv Getenv) (Config, error) {
 	}
 
 	if hosts, ok := raw["allowed_quota_hosts"]; ok {
-		cfg.AllowedQuotaHosts = parseSet(hosts)
+		parsed, err := parseHostSet(hosts, "allowed_quota_hosts")
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.AllowedQuotaHosts = parsed
 	}
 	if ignored, ok := raw["ignored_plans"]; ok {
-		cfg.IgnoredPlans = parsePlanSet(ignored)
+		parsed, err := parsePlanSet(ignored, "ignored_plans")
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.IgnoredPlans = parsed
 	}
 	if terminal, ok := raw["terminal_error_codes"]; ok {
-		cfg.TerminalErrorCodes = parseSet(terminal)
+		parsed, err := parseStringSet(terminal, "terminal_error_codes")
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.TerminalErrorCodes = parsed
 	}
 	if smtpRaw, ok := objectValue(raw["smtp"]); ok {
 		cfg.SMTP, err = parseSMTP(smtpRaw)
@@ -298,15 +324,11 @@ func parseRules(raw any, ignored PlanSet) (map[string]PlanRule, map[string]strin
 		}
 		rule := PlanRule{Name: name, Window: window, Weight: weight}
 		if rawAliases, ok := obj["aliases"]; ok {
-			aliasValues, ok := arrayValue(rawAliases)
-			if !ok {
-				return nil, nil, fmt.Errorf("plan rule %q aliases must be an array", name)
+			aliasValues, err := parseStringList(rawAliases, fmt.Sprintf("plan_rules[%d].aliases", i))
+			if err != nil {
+				return nil, nil, err
 			}
-			for _, aliasRaw := range aliasValues {
-				alias, ok := aliasRaw.(string)
-				if !ok {
-					return nil, nil, fmt.Errorf("plan rule %q aliases must contain only strings", name)
-				}
+			for _, alias := range aliasValues {
 				alias = NormalizePlan(alias)
 				if alias != "" {
 					rule.Aliases = append(rule.Aliases, alias)
@@ -337,6 +359,10 @@ func NormalizePlan(value string) string {
 	lower := strings.ToLower(strings.TrimSpace(value))
 	replacer := strings.NewReplacer(" ", "", "_", "", "-", "")
 	return replacer.Replace(lower)
+}
+
+func NormalizeHost(value string) string {
+	return strings.TrimRight(strings.ToLower(strings.TrimSpace(value)), ".")
 }
 
 func parseSMTP(raw map[string]any) (SMTPConfig, error) {
@@ -429,36 +455,73 @@ func isForbiddenPlainSecretKey(key string) bool {
 	return false
 }
 
-func parseSet(raw any) PlanSet {
+func parsePlanSet(raw any, field string) (PlanSet, error) {
+	items, err := parseStringList(raw, field)
+	if err != nil {
+		return nil, err
+	}
 	out := PlanSet{}
-	for _, item := range stringSlice(raw) {
-		normalized := NormalizePlan(item)
-		if normalized != "" {
+	for _, item := range items {
+		if normalized := NormalizePlan(item); normalized != "" {
 			out[normalized] = struct{}{}
 		}
 	}
-	return out
+	return out, nil
 }
 
-func parsePlanSet(raw any) PlanSet { return parseSet(raw) }
-
-func stringSlice(raw any) []string {
-	values, ok := arrayValue(raw)
-	if !ok {
-		if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
-			return []string{strings.TrimSpace(s)}
-		}
-		return nil
+func parseHostSet(raw any, field string) (HostSet, error) {
+	items, err := parseStringList(raw, field)
+	if err != nil {
+		return nil, err
 	}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
-			out = append(out, strings.TrimSpace(s))
+	out := HostSet{}
+	for _, item := range items {
+		if normalized := NormalizeHost(item); normalized != "" {
+			out[normalized] = struct{}{}
 		}
 	}
-	return out
+	return out, nil
 }
 
+func parseStringSet(raw any, field string) (StringSet, error) {
+	items, err := parseStringList(raw, field)
+	if err != nil {
+		return nil, err
+	}
+	out := StringSet{}
+	for _, item := range items {
+		if normalized := strings.TrimSpace(item); normalized != "" {
+			out[normalized] = struct{}{}
+		}
+	}
+	return out, nil
+}
+
+func parseStringList(raw any, field string) ([]string, error) {
+	switch values := raw.(type) {
+	case []string:
+		out := make([]string, 0, len(values))
+		for i, value := range values {
+			if strings.TrimSpace(value) == "" {
+				return nil, fmt.Errorf("%s[%d] must be a non-empty string", field, i)
+			}
+			out = append(out, strings.TrimSpace(value))
+		}
+		return out, nil
+	case []any:
+		out := make([]string, 0, len(values))
+		for i, value := range values {
+			text, ok := value.(string)
+			if !ok || strings.TrimSpace(text) == "" {
+				return nil, fmt.Errorf("%s[%d] must be a non-empty string", field, i)
+			}
+			out = append(out, strings.TrimSpace(text))
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("%s must be an array of strings", field)
+	}
+}
 func stringMap(raw any) map[string]string {
 	obj, ok := objectValue(raw)
 	if !ok {
