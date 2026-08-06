@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-This repository is pre-alpha and has no supported release version yet.
+This repository is a v0.1 release candidate and has no supported production release yet.
 
 ## Native Plugin Risk
 
@@ -17,7 +17,7 @@ This project targets a CLIProxyAPI native plugin loaded into the CPA process. Tr
 
 Do not commit secrets, real host addresses, real recipient addresses, account identifiers, production configuration, private keys, environment files, or generated state files.
 
-The planned plugin must not receive or store the CPA Management Key. Codex access material should exist only in memory for a single quota query and must not be written to state, logs, responses, or examples.
+The plugin must not receive or store the CPA Management Key. Codex access material should exist only in memory for a single quota query and must not be written to state, logs, responses, or examples.
 
 ## Reporting
 

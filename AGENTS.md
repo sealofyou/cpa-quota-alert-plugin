@@ -7,12 +7,12 @@ This repository is the public project harness for `cpa-quota-alert-plugin`, an M
 - Public repository target: `github.com/sealofyou/cpa-quota-alert-plugin`
 - Go module: `github.com/sealofyou/cpa-quota-alert-plugin`
 - License: MIT
-- Runtime dependency policy: Go standard library only for v0.1 runtime code
+- Runtime dependency policy: Go standard library plus `gopkg.in/yaml.v3 v3.0.1`
 - Plugin target: CLIProxyAPI C ABI v1 native plugin
 - Minimum CPA compatibility target: `v7.2.83`
 - Additional compatibility target: `v7.2.120`
 - First release target: Linux amd64 `.so` plus SHA-256 checksum
-- Current phase: pre-alpha harness scaffold; no ABI, quota, notification, or business implementation exists yet
+- Current phase: v0.1 release candidate; implementation and isolated CPA validation are complete, with production rollout gates still open
 
 ## Scope Rules
 
@@ -24,7 +24,7 @@ This repository is the public project harness for `cpa-quota-alert-plugin`, an M
 
 ## Implementation Boundaries
 
-For this scaffold task, do not add business packages or fake ABI implementations. Future implementation may use these directories:
+Keep changes narrow and public-safe. The current implementation uses these directories:
 
 - `cmd/plugin/` for the c-shared plugin package
 - `internal/abi/` for C ABI and host callback envelope handling
@@ -40,11 +40,13 @@ For this scaffold task, do not add business packages or fake ABI implementations
 
 Before claiming completion, run the narrow verification that matches the current phase:
 
-- `make verify`
 - `git diff --check`
 - placeholder and public-safety scans over tracked text files
+- `go test ./...`
+- `go vet ./...`
+- `scripts/verify.ps1` on Windows
 
-When implementation begins, expand verification to include `go test ./...`, `go test -race ./...`, `go vet ./...`, and Linux amd64 c-shared build checks once packages exist.
+Release-candidate evidence is recorded in `docs/iterations/ITERATION-002.md`. Public GitHub CI, `v0.1.0` tag/release publication, VPS1 three-round production dry-run, and rollback rehearsal remain release gates.
 
 ## Git Discipline
 

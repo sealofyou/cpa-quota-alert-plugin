@@ -1,12 +1,12 @@
 # CPA Quota Alert Plugin
 
-这是一个 pre-alpha 实现阶段的 CLIProxyAPI（CPA）原生插件，用于监控 Codex 额度并发送低噪声告警。
+这是一个 v0.1 release candidate 阶段的 CLIProxyAPI（CPA）原生插件，用于监控 Codex 额度并发送低噪声告警。
 
 本项目不是 OpenAI 官方项目，也不是 CLIProxyAPI 官方项目。
 
 ## 状态
 
-- 阶段：pre-alpha implementation
+- 阶段：v0.1 release candidate
 - 许可证：MIT
 - 语言：Go
 - 运行时依赖：Go 标准库与 `gopkg.in/yaml.v3 v3.0.1`
@@ -17,7 +17,13 @@
 
 当前已实现：严格 YAML/配置校验、类型化 Host Callback、Codex 凭据发现与额度查询、额度聚合、告警状态机、原子状态存储、插件生命周期、Linux C ABI exports、受保护 Management handlers、SMTP/Webhook 发送、公开安全示例配置和 systemd timer 资产。
 
-当前 release Gate 尚未完成。Linux systemd 集成、VPS dry-run 证据、race test、Linux amd64 c-shared release 产物仍需验证后才能生产启用。
+当前 release Gate 尚未完成。Windows 验证、隔离 Linux 验证、Linux amd64 c-shared 构建、隔离 CPA 加载验证和 root-only SMTP 测试投递已通过。公开 GitHub CI、`v0.1.0` tag/release、VPS1 三轮 production dry-run 和回滚演练仍需完成后，才能进入生产启用。
+
+当前 Linux amd64 `.so` 候选 SHA-256：
+
+```text
+c66bb40b9fb80b44a7494105b1a8b93f5b7631d6fde257d23a97cb658123e63a
+```
 
 ## 计划行为
 
@@ -57,7 +63,7 @@ Windows PowerShell 入口：
 powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 ```
 
-当前验证会运行 `gofmt -l`、`go test ./...` 和 `go vet ./...`。race test 与 Linux amd64 c-shared 构建需要 Linux cgo 工具链，仍是发布前 Gate。
+当前验证会运行 `gofmt -l`、`go test ./...` 和 `go vet ./...`。Windows `go test`、`go vet` 和 `scripts/verify.ps1` 在使用专用 Go cache 时已通过；隔离 Linux 官方 `golang:1.24-bookworm` 环境中，`go test ./...`、`go test -race ./...`、`go vet ./...` 和 Linux amd64 c-shared 构建已通过。公开 GitHub Actions 尚未作为 release 证据运行。
 
 ## 配置
 
@@ -74,7 +80,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 - 900 秒 stale 窗口
 - Webhook 默认关闭
 
-`examples/operator-confirmed-pro20.yaml` 只是 operator 本地假设示例，不是 OpenAI 官方事实。它把模糊的 `pro` 映射为 Pro20x，并且故意不提供默认 Pro5 映射；如需 Pro5，必须在本地配置里另加精确 alias。
+`examples/operator-confirmed-pro20.yaml` 只是 operator 本地假设示例，不是 OpenAI 官方事实。其中 K12 配置为 `5h` 窗口 `0.2x`，模糊 `pro` 配置为 `7d` 窗口 `20x`，并且不提供默认 Pro5 映射。
 
 通知密钥只通过插件 YAML 中的环境变量名间接引用。`deploy/systemd/plugin.env.example` 是示例；复制到 `/etc/cpa-quota-alert-plugin/plugin.env` 这类不入 Git 的 root-only 路径后，设置 owner `root:root`、mode `0600`。本地 root-only 文件中的 `CPA_QUOTA_ALERT_SMTP_PASSWORD` 值就是实际 SMTP 密码；仓库示例值必须保持虚构。将 `deploy/systemd/cpa-service-plugin-env.conf.example` 安装为实际 CPA systemd service 的 drop-in，具体服务名取决于 CPA 的安装方式。该 drop-in 会注入 env 文件，并让 systemd 为实际 CPA service 身份创建 mode `0700` 的 `/var/lib/cpa-quota-alert-plugin`。修改通知值后，需要 `systemctl daemon-reload` 并受控重启 CPA，让同进程插件注册时拿到新环境。oneshot timer 仍不读取 `plugin.env`。
 
@@ -113,11 +119,12 @@ unit 保留 `UMask=0077`、`NoNewPrivileges=true` 和不阻断 loopback 网络�
 ## 上线顺序
 
 1. dry-run 前先验证 state 目录的 owner、mode 和写权限。
-2. 先在隔离 VPS2 CPA 实例中用 dry-run 和假通知配置验证。
-3. VPS2 行为符合预期后，再把插件放到 VPS1。
-4. VPS1 连续三轮 dry-run，并与旧监控结果对齐。
-5. dry-run 稳定后再调用 `test-notification`。
-6. operator 确认测试通知后，才启用真实通知发送。
+2. 以已通过的隔离 CPA 行为作为进入 VPS1 的最低门槛。
+3. 公开 release 资产和 checksum 可用后，再把插件放到 VPS1。
+4. VPS1 连续三轮 production dry-run，并与旧监控结果对齐。
+5. 启用真实通知前先演练回滚。
+6. dry-run 和回滚演练稳定后再调用 `test-notification`。
+7. operator 确认测试通知后，才启用真实通知发送。
 
 ## 回滚
 

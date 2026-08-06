@@ -1,12 +1,12 @@
 # CPA Quota Alert Plugin
 
-Pre-alpha implementation of a CLIProxyAPI (CPA) native plugin for monitoring Codex quota and sending low-noise quota alerts.
+v0.1 release candidate of a CLIProxyAPI (CPA) native plugin for monitoring Codex quota and sending low-noise quota alerts.
 
 This is not an OpenAI official project and not a CLIProxyAPI official project.
 
 ## Status
 
-- Phase: pre-alpha implementation
+- Phase: v0.1 release candidate
 - License: MIT
 - Language: Go
 - Runtime dependencies: Go standard library plus `gopkg.in/yaml.v3 v3.0.1`
@@ -17,7 +17,13 @@ This is not an OpenAI official project and not a CLIProxyAPI official project.
 
 Implemented so far: strict YAML/config validation, typed host callbacks, Codex discovery and quota querying, quota aggregation, alert state transitions, atomic state storage, plugin lifecycle, Linux C ABI exports, protected Management handlers, SMTP/webhook delivery, public-safe example configuration, and systemd timer assets.
 
-Release gate is not complete. Linux systemd integration, VPS dry-run evidence, race testing, and Linux amd64 c-shared release artifacts still need to be verified before any production rollout.
+Release gate is not complete. Windows verification, isolated Linux verification, Linux amd64 c-shared build, isolated CPA load tests, and root-only SMTP test delivery have passed. Public GitHub CI, the `v0.1.0` tag/release, VPS1 three-round production dry-run, and rollback rehearsal still need to be completed before any production rollout.
+
+Current Linux amd64 `.so` candidate SHA-256:
+
+```text
+c66bb40b9fb80b44a7494105b1a8b93f5b7631d6fde257d23a97cb658123e63a
+```
 
 ## Intended Behavior
 
@@ -75,7 +81,7 @@ Windows PowerShell entry:
 powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 ```
 
-Verification runs `gofmt -l`, `go test ./...`, and `go vet ./...` on every supported development host. Race testing and the Linux amd64 c-shared build require a Linux cgo toolchain and remain release gates.
+Verification runs `gofmt -l`, `go test ./...`, and `go vet ./...` on every supported development host. Windows `go test`, `go vet`, and `scripts/verify.ps1` pass when using a dedicated Go cache. In isolated Linux with the official `golang:1.24-bookworm` image, `go test ./...`, `go test -race ./...`, `go vet ./...`, and the Linux amd64 c-shared build have passed. Public GitHub Actions has not yet been used as release evidence.
 
 ## Configuration
 
@@ -92,7 +98,7 @@ Use `examples/plugin-config.yaml` as the public conservative baseline:
 - Stale status window: 900 seconds
 - Webhook disabled by default
 
-Use `examples/operator-confirmed-pro20.yaml` only as a local-operator assumption sample. It is not an OpenAI official fact. It maps ambiguous `pro` to Pro20x and intentionally does not define a default Pro5 mapping.
+Use `examples/operator-confirmed-pro20.yaml` only as a local-operator assumption sample. It is not an OpenAI official fact. In that file, K12 is configured as `0.2x` over `5h`, ambiguous `pro` is configured as `20x` over `7d`, and no default Pro5 mapping is defined.
 
 Notification secrets are referenced only through env names in plugin YAML. The example env file lives at `deploy/systemd/plugin.env.example`; copy it to an ignored root-only path such as `/etc/cpa-quota-alert-plugin/plugin.env`, set owner `root:root`, and set mode `0600`. `CPA_QUOTA_ALERT_SMTP_PASSWORD` is the actual SMTP password value in the local root-only file; keep the committed example fake. Install `deploy/systemd/cpa-service-plugin-env.conf.example` as a drop-in under the actual CPA systemd service, whose service name depends on the CPA installation. The drop-in injects the env file and asks systemd to create `/var/lib/cpa-quota-alert-plugin` with mode `0700` for the actual CPA service identity. After changing notification values, run `systemctl daemon-reload` and perform a controlled restart of CPA so the in-process plugin registration sees the new environment. The oneshot timer still does not read `plugin.env`.
 
@@ -131,11 +137,12 @@ The unit keeps `UMask=0077`, `NoNewPrivileges=true`, and hardening that still pe
 ## Rollout Order
 
 1. Validate the state directory ownership, mode, and write permission before dry-run checks.
-2. Validate in an isolated VPS2 CPA instance with dry-run mode and fake notification settings.
-3. Move the plugin to VPS1 only after VPS2 behavior matches expectations.
-4. Run three VPS1 dry-run checks and compare with the existing monitoring view.
-5. Call `test-notification` only after dry-run results are stable.
-6. Enable real notification delivery only after the operator confirms the test notification.
+2. Use the already validated isolated CPA behavior as the minimum bar before VPS1.
+3. Move the plugin to VPS1 only after public release assets and checksums are available.
+4. Run three VPS1 production dry-run checks and compare with the existing monitoring view.
+5. Rehearse rollback before enabling real notification delivery.
+6. Call `test-notification` only after dry-run results are stable.
+7. Enable real notification delivery only after the operator confirms the test notification.
 
 ## Rollback
 

@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   linux-release-gate:
@@ -36,3 +36,15 @@ jobs:
           path: |
             dist/cpa-quota-alert-plugin.so
             dist/cpa-quota-alert-plugin.so.sha256
+
+      - name: Publish GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG_NAME" \
+            dist/cpa-quota-alert-plugin.so \
+            dist/cpa-quota-alert-plugin.so.sha256 \
+            --verify-tag \
+            --title "$TAG_NAME" \
+            --notes "Linux amd64 CPA native plugin release candidate assets. Verify cpa-quota-alert-plugin.so against the attached SHA-256 checksum before installing."
