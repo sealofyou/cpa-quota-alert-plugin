@@ -2,6 +2,8 @@ package config
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -23,6 +25,28 @@ terminal_error_codes: [token_revoked]
 	}
 	if !cfg.DryRun || cfg.Concurrency != 3 || cfg.PlanRules["k12"].Weight != 0.2 || !cfg.TerminalErrorCodes.Contains("token_revoked") {
 		t.Fatalf("unexpected config: %+v", cfg)
+	}
+}
+
+func TestParseYAMLOperatorConfirmedPro20Example(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "examples", "operator-confirmed-pro20.yaml"))
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	cfg, err := ParseYAML(data, func(string) string { return "example-value" })
+	if err != nil {
+		t.Fatalf("ParseYAML: %v", err)
+	}
+	k12 := cfg.PlanRules["k12"]
+	if k12.Window != Window5h || k12.Weight != 0.2 {
+		t.Fatalf("k12 rule = %+v, want window %q weight 0.2", k12, Window5h)
+	}
+	if got := cfg.Aliases["pro"]; got != "pro20" {
+		t.Fatalf("alias pro = %q, want pro20", got)
+	}
+	pro20 := cfg.PlanRules["pro20"]
+	if pro20.Window != Window7d || pro20.Weight != 20 {
+		t.Fatalf("pro20 rule = %+v, want window %q weight 20", pro20, Window7d)
 	}
 }
 
