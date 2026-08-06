@@ -111,11 +111,13 @@ func TestCheckFiltersAndKeepsStableOrderWithPartialErrors(t *testing.T) {
 			{Provider: "codex"},
 			{AuthIndex: "missing", Type: "codex"},
 			{AuthIndex: "runtime", Provider: "codex", RuntimeOnly: true},
+			{AuthIndex: "badcred", Provider: "codex"},
 			{AuthIndex: "ok2", Type: "CoDeX", Unavailable: true},
 		},
 		get: map[string]fakeGet{
-			"ok1": {body: authJSON("tok-one", "acct-one")},
-			"ok2": {body: authJSON("tok-two", "acct-two")},
+			"ok1":     {body: authJSON("tok-one", "acct-one")},
+			"ok2":     {body: authJSON("tok-two", "acct-two")},
+			"badcred": {body: json.RawMessage(`[]`)},
 		},
 		http: map[string][]fakeHTTP{
 			"acct-one": {{resp: abi.HTTPResponse{StatusCode: 200, Body: quotaBody("plus", 25)}}},
@@ -123,13 +125,13 @@ func TestCheckFiltersAndKeepsStableOrderWithPartialErrors(t *testing.T) {
 		},
 	}
 	obs, stats := NewService(h, testConfig()).Check(context.Background())
-	if stats.Selected != 5 || stats.Skipped != 1 || stats.Disabled != 1 || stats.RuntimeOnly != 1 || stats.GetFailed != 1 || stats.MissingIndex != 1 || stats.Unavailable != 1 {
+	if stats.Selected != 6 || stats.Skipped != 1 || stats.Disabled != 1 || stats.RuntimeOnly != 1 || stats.GetFailed != 1 || stats.MissingIndex != 1 || stats.Unreadable != 1 || stats.Unavailable != 1 {
 		t.Fatalf("unexpected stats: %+v", stats)
 	}
-	if len(obs) != 5 {
+	if len(obs) != 6 {
 		t.Fatalf("observations len=%d %+v", len(obs), obs)
 	}
-	if !obs[0].Success || obs[0].WeightedRemaining != 0.75 || obs[1].UnresolvedCode != "missingauthindex" || obs[2].UnresolvedCode != "authgeterror" || obs[3].UnresolvedCode != "runtimeauthunreadable" || !obs[4].Success || obs[4].WeightedRemaining != 0.5 {
+	if !obs[0].Success || obs[0].WeightedRemaining != 0.75 || obs[1].UnresolvedCode != "missingauthindex" || obs[2].UnresolvedCode != "authgeterror" || obs[3].UnresolvedCode != "runtimeauthunreadable" || obs[4].UnresolvedCode == "" || !obs[5].Success || obs[5].WeightedRemaining != 0.5 {
 		t.Fatalf("unexpected stable observations: %+v", obs)
 	}
 }

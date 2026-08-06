@@ -86,7 +86,7 @@ func (s *Service) Check(ctx context.Context) ([]quota.AccountObservation, Discov
 		limit = 1
 	}
 	jobs := make(chan job)
-	results := make([]quota.AccountObservation, len(selected))
+	results := make([]workerResult, len(selected))
 	var wg sync.WaitGroup
 	workers := limit
 	if workers > len(selected) {
@@ -97,8 +97,8 @@ func (s *Service) Check(ctx context.Context) ([]quota.AccountObservation, Discov
 		go func() {
 			defer wg.Done()
 			for job := range jobs {
-				obs, _ := s.checkOne(ctx, job.entry)
-				results[job.index] = obs
+				obs, localStats := s.checkOne(ctx, job.entry)
+				results[job.index] = workerResult{observation: obs, stats: localStats}
 			}
 		}()
 	}
@@ -110,28 +110,30 @@ func (s *Service) Check(ctx context.Context) ([]quota.AccountObservation, Discov
 	}
 	close(jobs)
 	wg.Wait()
-	for i, entry := range selected {
-		obs := results[i]
-		if obs == (quota.AccountObservation{}) {
-			continue
-		}
-		if entry.AuthIndex == "" {
-			stats.MissingIndex++
-		} else if entry.RuntimeOnly {
-			stats.RuntimeOnly++
-		} else if obs.UnresolvedCode == normalizeByObservation("auth_get_error") {
-			stats.GetFailed++
-		} else if obs.UnresolvedCode == normalizeByObservation("credential_invalid") {
-			stats.Unreadable++
-		}
-	}
 	out := make([]quota.AccountObservation, 0, len(results))
-	for _, obs := range results {
-		if obs != (quota.AccountObservation{}) {
-			out = append(out, obs)
+	for _, result := range results {
+		stats.add(result.stats)
+		if result.observation != (quota.AccountObservation{}) {
+			out = append(out, result.observation)
 		}
 	}
 	return out, stats
+}
+
+type workerResult struct {
+	observation quota.AccountObservation
+	stats       DiscoveryStats
+}
+
+func (s *DiscoveryStats) add(other DiscoveryStats) {
+	s.Selected += other.Selected
+	s.Skipped += other.Skipped
+	s.Disabled += other.Disabled
+	s.Unavailable += other.Unavailable
+	s.RuntimeOnly += other.RuntimeOnly
+	s.MissingIndex += other.MissingIndex
+	s.GetFailed += other.GetFailed
+	s.Unreadable += other.Unreadable
 }
 
 type job struct {

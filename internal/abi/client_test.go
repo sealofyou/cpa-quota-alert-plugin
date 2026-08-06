@@ -127,17 +127,17 @@ func TestClientHTTPDoExactRequestAndDeepCopy(t *testing.T) {
 }
 
 func TestClientCallbackErrorAndInvalidEnvelopeAreRedacted(t *testing.T) {
-	caller := &recordingCaller{resp: []byte(`{"ok":false,"error":{"code":"token_invalidated","message":"Bearer tok path email@example.com","status":401,"retryable":true}}`)}
+	caller := &recordingCaller{resp: []byte(`{"ok":false,"error":{"code":"acct123TOKEN","message":"Bearer tok path email@example.com","status":401,"retryable":true}}`)}
 	client := NewClient(caller, "")
 	_, err := client.ListAuth(context.Background())
 	var callbackErr *CallbackError
 	if !errors.As(err, &callbackErr) {
 		t.Fatalf("expected CallbackError, got %T %v", err, err)
 	}
-	if callbackErr.Code != "token_invalidated" || callbackErr.Status != 401 || !callbackErr.Retryable {
+	if callbackErr.Code != "callback_error" || callbackErr.Status != 401 || !callbackErr.Retryable {
 		t.Fatalf("unexpected callback error: %+v", callbackErr)
 	}
-	if got := err.Error(); bytes.Contains([]byte(got), []byte("Bearer")) || bytes.Contains([]byte(got), []byte("email@example.com")) || bytes.Contains([]byte(got), []byte("path")) {
+	if got := err.Error(); bytes.Contains([]byte(got), []byte("Bearer")) || bytes.Contains([]byte(got), []byte("email@example.com")) || bytes.Contains([]byte(got), []byte("path")) || bytes.Contains([]byte(got), []byte("acct123TOKEN")) {
 		t.Fatalf("error leaked sensitive text: %q", got)
 	}
 
@@ -148,6 +148,34 @@ func TestClientCallbackErrorAndInvalidEnvelopeAreRedacted(t *testing.T) {
 	}
 }
 
+func TestClientCallbackErrorCodeAlwaysStable(t *testing.T) {
+	for _, rawCode := range []string{"plainTOKEN123", "user@example.com", `C:\Users\secret\auth.json`} {
+		body, err := json.Marshal(map[string]any{
+			"ok": false,
+			"error": map[string]any{
+				"code":      rawCode,
+				"message":   "ignored upstream message",
+				"status":    503,
+				"retryable": true,
+			},
+		})
+		if err != nil {
+			t.Fatalf("marshal fixture: %v", err)
+		}
+		caller := &recordingCaller{resp: body}
+		_, err = NewClient(caller, "").ListAuth(context.Background())
+		var callbackErr *CallbackError
+		if !errors.As(err, &callbackErr) {
+			t.Fatalf("expected CallbackError for %q, got %T %v", rawCode, err, err)
+		}
+		if callbackErr.Code != "callback_error" || callbackErr.Status != 503 || !callbackErr.Retryable {
+			t.Fatalf("unexpected callback error fields for %q: %+v", rawCode, callbackErr)
+		}
+		if got := callbackErr.Error(); bytes.Contains([]byte(got), []byte(rawCode)) || bytes.Contains([]byte(got), []byte("ignored upstream message")) {
+			t.Fatalf("callback error leaked untrusted code/message: %q", got)
+		}
+	}
+}
 func TestClientRejectsInvalidResultAndHonorsContextCancellation(t *testing.T) {
 	caller := &recordingCaller{resp: envelope(t, `{"files":"bad"}`)}
 	client := NewClient(caller, "")

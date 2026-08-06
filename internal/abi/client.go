@@ -9,6 +9,8 @@ import (
 
 const Version = "v1"
 
+const CallbackErrorCode = "callback_error"
+
 const (
 	MethodAuthList       = "host.auth.list"
 	MethodAuthGet        = "host.auth.get"
@@ -171,9 +173,9 @@ func (c *Client) call(ctx context.Context, method string, req any, result any) e
 	}
 	if !env.OK {
 		if env.Error == nil {
-			return &CallbackError{}
+			return &CallbackError{Code: CallbackErrorCode}
 		}
-		return &CallbackError{Code: env.Error.Code, Status: env.Error.Status, Retryable: env.Error.Retryable}
+		return &CallbackError{Code: CallbackErrorCode, Status: env.Error.Status, Retryable: env.Error.Retryable}
 	}
 	if len(env.Result) == 0 || string(env.Result) == "null" {
 		return ErrInvalidEnvelope
