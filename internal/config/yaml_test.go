@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -29,13 +30,41 @@ terminal_error_codes: [token_revoked]
 }
 
 func TestParseYAMLOperatorConfirmedPro20Example(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "examples", "operator-confirmed-pro20.yaml"))
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate yaml_test.go")
+	}
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "examples", "operator-confirmed-pro20.yaml"))
 	if err != nil {
 		t.Fatalf("read example: %v", err)
 	}
-	cfg, err := ParseYAML(data, func(string) string { return "example-value" })
+	expectedEnv := map[string]string{
+		"CPA_QUOTA_ALERT_SMTP_USER":     "example-user",
+		"CPA_QUOTA_ALERT_SMTP_PASSWORD": "example-password",
+		"CPA_QUOTA_ALERT_SMTP_TO":       "ops@example.com",
+		"CPA_QUOTA_ALERT_SMTP_FROM":     "alerts@example.com",
+	}
+	seenEnv := map[string]bool{}
+	var unexpectedEnv []string
+	cfg, err := ParseYAML(data, func(name string) string {
+		value, ok := expectedEnv[name]
+		if !ok {
+			unexpectedEnv = append(unexpectedEnv, name)
+			return ""
+		}
+		seenEnv[name] = true
+		return value
+	})
 	if err != nil {
 		t.Fatalf("ParseYAML: %v", err)
+	}
+	if len(unexpectedEnv) != 0 {
+		t.Fatalf("unexpected environment queries: %v", unexpectedEnv)
+	}
+	for name := range expectedEnv {
+		if !seenEnv[name] {
+			t.Fatalf("expected environment query %q was not used", name)
+		}
 	}
 	k12 := cfg.PlanRules["k12"]
 	if k12.Window != Window5h || k12.Weight != 0.2 {
