@@ -165,7 +165,7 @@ func (s *Service) checkOne(ctx context.Context, entry abi.HostAuthFileEntry) (qu
 		return s.observeError("missing_auth_index"), DiscoveryStats{MissingIndex: 1}
 	}
 	if entry.RuntimeOnly {
-		return s.observeError("runtime_only"), DiscoveryStats{RuntimeOnly: 1}
+		return s.observeError("runtime_auth_unreadable"), DiscoveryStats{RuntimeOnly: 1}
 	}
 	getCtx, cancel := s.withTimeout(ctx)
 	auth, err := s.host.GetAuth(getCtx, entry.AuthIndex)
@@ -186,7 +186,7 @@ func (s *Service) checkOne(ctx context.Context, entry abi.HostAuthFileEntry) (qu
 }
 
 func (s *Service) fetchQuota(ctx context.Context, cred Credential) ([]byte, string) {
-	attempts := s.cfg.RetryAttempts
+	attempts := s.cfg.RetryAttempts + 1
 	if attempts < 1 {
 		attempts = 1
 	}
@@ -216,7 +216,7 @@ func (s *Service) fetchQuota(ctx context.Context, cred Credential) ([]byte, stri
 		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
 			return append([]byte(nil), resp.Body...), ""
 		}
-		lastCode = responseErrorCode(resp.StatusCode, resp.Body)
+		lastCode = s.responseErrorCode(resp.StatusCode, resp.Body)
 		if resp.StatusCode >= 500 && resp.StatusCode <= 599 && attempt+1 < attempts {
 			s.sleep(ctx, attempt)
 			continue
@@ -315,22 +315,41 @@ func parseJWTPayload(token string) (map[string]any, error) {
 	return claims, nil
 }
 
-func responseErrorCode(status int, body []byte) string {
+func (s *Service) responseErrorCode(status int, body []byte) string {
 	var raw map[string]any
 	if err := json.Unmarshal(body, &raw); err == nil && raw != nil {
-		if code := nestedCode(raw, "error"); code != "" {
+		if code := firstResponseCode(raw); s.isTerminalErrorCode(code) {
 			return code
-		}
-		if code := nestedCode(raw, "detail"); code != "" {
-			return code
-		}
-		if code, _ := raw["code"].(string); strings.TrimSpace(code) != "" {
-			return strings.TrimSpace(code)
 		}
 	}
 	return "http_" + strconv.Itoa(status)
 }
 
+func firstResponseCode(raw map[string]any) string {
+	if code := nestedCode(raw, "error"); code != "" {
+		return code
+	}
+	if code := nestedCode(raw, "detail"); code != "" {
+		return code
+	}
+	if code, _ := raw["code"].(string); strings.TrimSpace(code) != "" {
+		return strings.TrimSpace(code)
+	}
+	return ""
+}
+
+func (s *Service) isTerminalErrorCode(code string) bool {
+	if strings.TrimSpace(code) == "" {
+		return false
+	}
+	normalized := normalizeByObservation(code)
+	for terminal := range s.cfg.TerminalErrorCodes {
+		if normalizeByObservation(terminal) == normalized {
+			return true
+		}
+	}
+	return false
+}
 func nestedCode(raw map[string]any, key string) string {
 	obj, _ := raw[key].(map[string]any)
 	if obj == nil {

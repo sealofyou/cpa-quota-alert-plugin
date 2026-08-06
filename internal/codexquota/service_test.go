@@ -129,7 +129,7 @@ func TestCheckFiltersAndKeepsStableOrderWithPartialErrors(t *testing.T) {
 	if len(obs) != 5 {
 		t.Fatalf("observations len=%d %+v", len(obs), obs)
 	}
-	if !obs[0].Success || obs[0].WeightedRemaining != 0.75 || obs[1].UnresolvedCode != "missingauthindex" || obs[2].UnresolvedCode != "authgeterror" || obs[3].UnresolvedCode != "runtimeonly" || !obs[4].Success || obs[4].WeightedRemaining != 0.5 {
+	if !obs[0].Success || obs[0].WeightedRemaining != 0.75 || obs[1].UnresolvedCode != "missingauthindex" || obs[2].UnresolvedCode != "authgeterror" || obs[3].UnresolvedCode != "runtimeauthunreadable" || !obs[4].Success || obs[4].WeightedRemaining != 0.5 {
 		t.Fatalf("unexpected stable observations: %+v", obs)
 	}
 }
@@ -155,24 +155,26 @@ func TestParseCredentialDirectAndJWTClaims(t *testing.T) {
 func TestHTTPHeadersRedactedErrorsAndRetryPolicy(t *testing.T) {
 	retryable := &abi.CallbackError{Code: "temporary", Retryable: true}
 	h := &fakeHost{
-		list: []abi.HostAuthFileEntry{{AuthIndex: "a", Provider: "codex"}, {AuthIndex: "b", Provider: "codex"}, {AuthIndex: "c", Provider: "codex"}, {AuthIndex: "d", Provider: "codex"}, {AuthIndex: "e", Provider: "codex"}},
-		get:  map[string]fakeGet{"a": {body: authJSON("secret-token", "acct-a")}, "b": {body: authJSON("tok-b", "acct-b")}, "c": {body: authJSON("tok-c", "acct-c")}, "d": {body: authJSON("tok-d", "acct-d")}, "e": {body: authJSON("tok-e", "acct-e")}},
+		list: []abi.HostAuthFileEntry{{AuthIndex: "a", Provider: "codex"}, {AuthIndex: "b", Provider: "codex"}, {AuthIndex: "c", Provider: "codex"}, {AuthIndex: "d", Provider: "codex"}, {AuthIndex: "e", Provider: "codex"}, {AuthIndex: "f", Provider: "codex"}, {AuthIndex: "g", Provider: "codex"}},
+		get:  map[string]fakeGet{"a": {body: authJSON("secret-token", "acct-a")}, "b": {body: authJSON("tok-b", "acct-b")}, "c": {body: authJSON("tok-c", "acct-c")}, "d": {body: authJSON("tok-d", "acct-d")}, "e": {body: authJSON("tok-e", "acct-e")}, "f": {body: authJSON("tok-f", "acct-f")}, "g": {body: authJSON("tok-g", "acct-g")}},
 		http: map[string][]fakeHTTP{
 			"acct-a": {{resp: abi.HTTPResponse{StatusCode: 401, Body: []byte(`{"error":{"code":"token_invalidated","message":"secret-token acct-a"}}`)}}},
 			"acct-b": {{resp: abi.HTTPResponse{StatusCode: 429, Body: []byte(`too many`)}}},
-			"acct-c": {{resp: abi.HTTPResponse{StatusCode: 500, Body: []byte(`{"detail":{"code":"upstream_down"}}`)}}, {resp: abi.HTTPResponse{StatusCode: 200, Body: quotaBody("plus", 10)}}},
-			"acct-d": {{err: retryable}, {resp: abi.HTTPResponse{StatusCode: 200, Body: quotaBody("plus", 20)}}},
-			"acct-e": {{resp: abi.HTTPResponse{StatusCode: 403, Body: []byte(`forbidden`)}}},
+			"acct-c": {{resp: abi.HTTPResponse{StatusCode: 500, Body: []byte(`{"detail":{"code":"upstream_down"}}`)}}, {resp: abi.HTTPResponse{StatusCode: 500, Body: []byte(`{"code":"still_down"}`)}}, {resp: abi.HTTPResponse{StatusCode: 200, Body: quotaBody("plus", 10)}}},
+			"acct-d": {{err: retryable}, {err: retryable}, {resp: abi.HTTPResponse{StatusCode: 200, Body: quotaBody("plus", 20)}}},
+			"acct-e": {{resp: abi.HTTPResponse{StatusCode: 403, Body: []byte(`{"code":"forbidden"}`)}}},
+			"acct-f": {{resp: abi.HTTPResponse{StatusCode: 400, Body: []byte(`{"error":{"code":"acct-a"}}`)}}},
+			"acct-g": {{resp: abi.HTTPResponse{StatusCode: 402, Body: []byte(`{"detail":{"code":"ordinary_unknown"}}`)}}},
 		},
 	}
 	obs, _ := NewService(h, testConfig()).Check(context.Background())
-	if obs[0].TerminalCode != "tokeninvalidated" || obs[1].UnresolvedCode != "http429" || !obs[2].Success || !obs[3].Success || obs[4].UnresolvedCode != "http403" {
+	if obs[0].TerminalCode != "tokeninvalidated" || obs[1].UnresolvedCode != "http429" || !obs[2].Success || !obs[3].Success || obs[4].TerminalCode != "forbidden" || obs[5].UnresolvedCode != "http400" || obs[6].UnresolvedCode != "http402" {
 		t.Fatalf("unexpected observations: %+v", obs)
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if len(h.requests) != 7 {
-		t.Fatalf("expected 7 requests with retries, got %d", len(h.requests))
+	if len(h.requests) != 11 {
+		t.Fatalf("expected 11 requests with retries, got %d", len(h.requests))
 	}
 	var found bool
 	for _, req := range h.requests {
@@ -187,7 +189,7 @@ func TestHTTPHeadersRedactedErrorsAndRetryPolicy(t *testing.T) {
 	if !found {
 		t.Fatalf("expected request for selected account")
 	}
-	if strings.Contains(fmt.Sprint(obs), "secret-token") || strings.Contains(fmt.Sprint(obs), "acct-a") {
+	if strings.Contains(fmt.Sprint(obs), "secret-token") || strings.Contains(fmt.Sprint(obs), "acct-a") || strings.Contains(fmt.Sprint(obs), "ordinary_unknown") {
 		t.Fatalf("observations leaked secret/account: %+v", obs)
 	}
 }
