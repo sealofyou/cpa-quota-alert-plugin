@@ -12,7 +12,7 @@ This is not an OpenAI official project and not a CLIProxyAPI official project.
 - Runtime dependencies: Go standard library plus `gopkg.in/yaml.v3 v3.0.1`
 - Plugin target: CLIProxyAPI C ABI v1
 - Minimum CPA compatibility target: `v7.2.83`
-- Additional compatibility target: `v7.2.120`
+- Additional compatibility target: `v7.2.120`, `v7.2.157`
 - First release target: Linux amd64 `.so` with SHA-256 checksum
 
 Implemented so far: strict YAML/config validation, typed host callbacks, Codex discovery and quota querying, quota aggregation, alert state transitions, atomic state storage, plugin lifecycle, Linux C ABI exports, protected Management handlers, SMTP/webhook delivery, public-safe example configuration, and systemd timer assets.

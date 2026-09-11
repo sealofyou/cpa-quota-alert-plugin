@@ -18,7 +18,13 @@ const (
 	MethodPluginShutdown    = "plugin.shutdown"
 
 	SchemaVersion = 1
-	PluginVersion = "0.1.0"
+	PluginVersion = "0.1.1"
+
+	// HostSchemaVersionCPA72157 is the RPC schema that official CPA v7.2.157
+	// sends on plugin.register. The register payload shape is still
+	// config_yaml + schema_version; versions 3-6 only change later stream
+	// and management encoding, which this plugin does not consume at register.
+	HostSchemaVersionCPA72157 = 6
 
 	maxLifecycleRequestBytes = config.MaxYAMLBytes*2 + 4096
 )
@@ -263,7 +269,7 @@ func decodeLifecycleRequest(raw []byte) (lifecycleRequest, error) {
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return lifecycleRequest{}, errors.New("invalid lifecycle request")
 	}
-	if req.SchemaVersion > 2 {
+	if req.SchemaVersion > HostSchemaVersionCPA72157 {
 		return lifecycleRequest{}, errors.New("unsupported lifecycle request schema")
 	}
 	return req, nil

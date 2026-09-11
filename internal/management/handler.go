@@ -21,7 +21,7 @@ const (
 	MethodManagementRegister = "management.register"
 	MethodManagementHandle   = "management.handle"
 
-	PluginVersion = "0.1.0"
+	PluginVersion = "0.1.1"
 
 	MaxRequestBodyBytes       = 64 * 1024
 	MaxManagementRequestBytes = MaxRequestBodyBytes*2 + 4096
