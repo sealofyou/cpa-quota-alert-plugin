@@ -18,7 +18,7 @@ const (
 	MethodPluginShutdown    = "plugin.shutdown"
 
 	SchemaVersion = 1
-	PluginVersion = "0.1.1"
+	PluginVersion = "0.1.2"
 
 	// HostSchemaVersionCPA72157 is the RPC schema that official CPA v7.2.157
 	// sends on plugin.register. The register payload shape is still
@@ -307,6 +307,7 @@ func pluginRegistration() registration {
 				{Name: "dry_run", Type: "boolean", Description: "Evaluates alerts without delivering notifications."},
 				{Name: "low_threshold", Type: "number", Description: "Creates a low-quota event below this Plus-week equivalent."},
 				{Name: "recovery_threshold", Type: "number", Description: "Creates a recovery event at or above this Plus-week equivalent."},
+				{Name: "mail.templates", Type: "object", Description: "Optional public-safe subject/body overrides. Recipients stay in environment variables."},
 			},
 		},
 		Capabilities: registrationCapabilities{ManagementAPI: true},

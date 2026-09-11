@@ -21,7 +21,7 @@ const (
 	MethodManagementRegister = "management.register"
 	MethodManagementHandle   = "management.handle"
 
-	PluginVersion = "0.1.1"
+	PluginVersion = "0.1.2"
 
 	MaxRequestBodyBytes       = 64 * 1024
 	MaxManagementRequestBytes = MaxRequestBodyBytes*2 + 4096
@@ -277,7 +277,7 @@ func (h *Handler) check(ctx context.Context, req Request) Response {
 	if dryRun {
 		return jsonResponse(200, result)
 	}
-	deliveredState, delivery, errCode := h.deliverPending(ctx, store, next, channels, now)
+	deliveredState, delivery, errCode := h.deliverPending(ctx, store, next, channels, now, cfg)
 	if errCode != "" {
 		result["delivery"] = delivery
 		result["error_code"] = errCode
@@ -288,7 +288,7 @@ func (h *Handler) check(ctx context.Context, req Request) Response {
 	return jsonResponse(200, result)
 }
 
-func (h *Handler) deliverPending(ctx context.Context, store Store, current monitor.State, channels []Channel, now time.Time) (monitor.State, []deliveryResult, string) {
+func (h *Handler) deliverPending(ctx context.Context, store Store, current monitor.State, channels []Channel, now time.Time, cfg config.Config) (monitor.State, []deliveryResult, string) {
 	state := current
 	byName := map[string]notify.Sender{}
 	for _, channel := range channels {
@@ -304,7 +304,16 @@ func (h *Handler) deliverPending(ctx context.Context, store Store, current monit
 			if !ok || sender == nil {
 				continue
 			}
-			err := sender.Send(ctx, messageForEvent(event))
+			msg, renderErr := messageForEvent(event, cfg)
+			if renderErr != nil {
+				state = monitor.MarkDelivered(state, event.ID, channel, false, now)
+				results = append(results, deliveryResult{EventID: event.ID, Channel: channel, Status: "failed", ErrorCode: deliveryErrorCode(renderErr)})
+				if err := store.Save(ctx, state); err != nil {
+					return state, results, "store_save_failed"
+				}
+				continue
+			}
+			err := sender.Send(ctx, msg)
 			delivered := err == nil
 			code := ""
 			if err != nil {
@@ -381,7 +390,17 @@ func (h *Handler) testNotification(ctx context.Context, req Request) Response {
 		}
 		return jsonResponse(200, map[string]any{"would_notify": len(channels) > 0, "delivery": results})
 	}
-	msg := notify.Message{EventID: "management-test", EventType: "test_notification", Subject: "CPA quota alert test", Body: "This is a CPA quota alert plugin test notification.", OccurredAt: h.deps.Clock.Now().UTC()}
+	msg, err := notify.Render(notify.RenderInput{
+		Kind:              notify.KindTestNotification,
+		OccurredAt:        h.deps.Clock.Now().UTC(),
+		LowThreshold:      cfg.LowThreshold,
+		RecoveryThreshold: cfg.RecoveryThreshold,
+		Templates:         cfg.Mail,
+	})
+	if err != nil {
+		return errorResponse(500, "notify_invalid_message")
+	}
+	msg.EventID = "management-test"
 	for _, channel := range channels {
 		code := ""
 		status := "delivered"
@@ -574,14 +593,20 @@ func isAllowedDeliveryCode(code string) bool {
 	}
 }
 
-func messageForEvent(event monitor.Event) notify.Message {
-	return notify.Message{
-		EventID:    event.ID,
-		EventType:  event.Kind,
-		Subject:    "CPA quota alert: " + event.Kind,
-		Body:       "CPA quota alert event " + event.Kind + " is pending delivery.",
-		OccurredAt: event.CreatedAt,
+func messageForEvent(event monitor.Event, cfg config.Config) (notify.Message, error) {
+	msg, err := notify.Render(notify.RenderInput{
+		Kind:              event.Kind,
+		Summary:           event.Summary,
+		OccurredAt:        event.CreatedAt,
+		LowThreshold:      cfg.LowThreshold,
+		RecoveryThreshold: cfg.RecoveryThreshold,
+		Templates:         cfg.Mail,
+	})
+	if err != nil {
+		return notify.Message{}, err
 	}
+	msg.EventID = event.ID
+	return msg, nil
 }
 
 func errorCode(err error) string {

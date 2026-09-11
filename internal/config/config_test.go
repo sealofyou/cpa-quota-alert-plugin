@@ -456,3 +456,30 @@ func TestTerminalCodesDoNotCoerceNumbers(t *testing.T) {
 		t.Fatalf("numeric terminal code must not be coerced to string")
 	}
 }
+
+func TestParseMailTemplates(t *testing.T) {
+	cfg, err := Parse(map[string]any{
+		"mail": map[string]any{
+			"templates": map[string]any{
+				"low": map[string]any{
+					"subject": "quota low {{total}}",
+					"body":    "remaining={{total}} threshold={{low_threshold}}",
+				},
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("valid mail templates should parse: %v", err)
+	}
+	if cfg.Mail.Templates["low"].Subject != "quota low {{total}}" {
+		t.Fatalf("subject=%q", cfg.Mail.Templates["low"].Subject)
+	}
+	_, err = Parse(map[string]any{"mail": map[string]any{"templates": map[string]any{"low": map[string]any{"subject": "x {{secret}}", "body": "y"}}}}, nil)
+	if err == nil {
+		t.Fatal("unknown placeholder must fail")
+	}
+	_, err = Parse(map[string]any{"mail": map[string]any{"templates": map[string]any{"custom": map[string]any{"subject": "x", "body": "y"}}}}, nil)
+	if err == nil {
+		t.Fatal("unknown kind must fail")
+	}
+}
