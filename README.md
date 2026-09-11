@@ -1,29 +1,20 @@
 # CPA Quota Alert Plugin
 
-v0.1 release candidate of a CLIProxyAPI (CPA) native plugin for monitoring Codex quota and sending low-noise quota alerts.
+A CLIProxyAPI (CPA) native plugin that monitors Codex quota and sends low-noise alerts.
 
 This is not an OpenAI official project and not a CLIProxyAPI official project.
 
 ## Status
 
-- Phase: v0.1 release candidate
+- Version: `0.1.2`
 - License: MIT
 - Language: Go
 - Runtime dependencies: Go standard library plus `gopkg.in/yaml.v3 v3.0.1`
 - Plugin target: CLIProxyAPI C ABI v1
-- Minimum CPA compatibility target: `v7.2.83`
-- Additional compatibility target: `v7.2.120`, `v7.2.157`
-- First release target: Linux amd64 `.so` with SHA-256 checksum
+- Compatibility: `v7.2.83`, `v7.2.120`, `v7.2.157`
+- Release asset: Linux amd64 `.so` with SHA-256 checksum on GitHub Releases
 
-Implemented so far: strict YAML/config validation, typed host callbacks, Codex discovery and quota querying, quota aggregation, alert state transitions, atomic state storage, plugin lifecycle, Linux C ABI exports, protected Management handlers, SMTP/webhook delivery, public-safe example configuration, and systemd timer assets.
-
-Release gate is not complete. Windows verification, isolated Linux verification, Linux amd64 c-shared build, isolated CPA load tests, and root-only SMTP test delivery have passed. Public GitHub CI, the `v0.1.0` tag/release, VPS1 three-round production dry-run, and rollback rehearsal still need to be completed before any production rollout.
-
-Current Linux amd64 `.so` candidate SHA-256:
-
-```text
-c66bb40b9fb80b44a7494105b1a8b93f5b7631d6fde257d23a97cb658123e63a
-```
+The plugin registers with CPA, checks Codex quota, and can send SMTP or webhook notifications. Mail bodies are public-safe templates with aggregate totals only. Recipients and SMTP secrets stay in a root-only env file, never in this repository. Verify the `.so` checksum from the GitHub Release before installing.
 
 ## Intended Behavior
 
@@ -81,13 +72,13 @@ Windows PowerShell entry:
 powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 ```
 
-Verification runs `gofmt -l`, `go test ./...`, and `go vet ./...` on every supported development host. Windows `go test`, `go vet`, and `scripts/verify.ps1` pass when using a dedicated Go cache. In isolated Linux with the official `golang:1.24-bookworm` image, `go test ./...`, `go test -race ./...`, `go vet ./...`, and the Linux amd64 c-shared build have passed. Public GitHub Actions has not yet been used as release evidence.
+Verification runs `gofmt -l`, `go test ./...`, and `go vet ./...` on every supported development host. Windows `go test`, `go vet`, and `scripts/verify.ps1` pass when using a dedicated Go cache. GitHub Actions CI and Release workflows build and publish the Linux amd64 `.so`.
 
 ## Configuration
 
 Use `examples/plugin-config.yaml` as the public conservative baseline:
 
-- `dry_run: true` by default
+- `dry_run: true` by default. Set `dry_run: false` only after SMTP env and a test notification work.
 - Plus and Team only, both `1x` over `7d`
 - Free plans ignored
 - Terminal codes: `token_invalidated`, `token_revoked`, `deactivated_workspace`
@@ -100,9 +91,35 @@ Use `examples/plugin-config.yaml` as the public conservative baseline:
 
 Use `examples/operator-confirmed-pro20.yaml` only as a local-operator assumption sample. It is not an OpenAI official fact. In that file, K12 is configured as `0.2x` over `5h`, ambiguous `pro` is configured as `20x` over `7d`, and no default Pro5 mapping is defined.
 
-Notification secrets are referenced only through env names in plugin YAML. The example env file lives at `deploy/systemd/plugin.env.example`; copy it to an ignored root-only path such as `/etc/cpa-quota-alert-plugin/plugin.env`, set owner `root:root`, and set mode `0600`. `CPA_QUOTA_ALERT_SMTP_PASSWORD` is the actual SMTP password value in the local root-only file; keep the committed example fake. Install `deploy/systemd/cpa-service-plugin-env.conf.example` as a drop-in under the actual CPA systemd service, whose service name depends on the CPA installation. The drop-in injects the env file and asks systemd to create `/var/lib/cpa-quota-alert-plugin` with mode `0700` for the actual CPA service identity. After changing notification values, run `systemctl daemon-reload` and perform a controlled restart of CPA so the in-process plugin registration sees the new environment. The oneshot timer still does not read `plugin.env`.
+### SMTP and recipients
+
+Notification secrets are referenced only through env names in plugin YAML. Copy `deploy/systemd/plugin.env.example` to an ignored root-only path such as `/etc/cpa-quota-alert-plugin/plugin.env`, set owner `root:root`, and set mode `0600`. Put the real SMTP user, password, From, and recipients only in that file. Keep the committed example fake.
+
+Install `deploy/systemd/cpa-service-plugin-env.conf.example` as a drop-in under the actual CPA systemd service. After changing notification values, run `systemctl daemon-reload` and restart CPA so the in-process plugin sees the new environment. The oneshot timer does not read `plugin.env`.
 
 The CPA Management Key must not be placed in `ExecStart`, CPA plugin YAML, environment variables, README command lines, logs, or plugin state. Put it only in the root-owned curl config copied from `deploy/systemd/curl.conf.example`, with mode `0600`.
+
+### Mail templates
+
+Default mail is English and contains only aggregate fields: remaining Plus-week equivalents, thresholds, partial/unresolved counts, stable error codes, and unrecognized plan names. It does not include account emails, tokens, Management Keys, or host names.
+
+Omit `mail.templates` to keep the built-in text. To change subject or body, copy the block you need from `examples/mail-templates.example.yaml` into the CPA plugin YAML:
+
+```yaml
+mail:
+  templates:
+    low:
+      subject: "[CPA quota] remaining {{total}} Plus-week equivalents"
+      body: |
+        Remaining: {{total}}
+        Low threshold: {{low_threshold}}
+```
+
+Supported events: `low`, `low_reminder`, `recovery`, `data_error`, `plan_changed`, `test_notification`.
+
+Allowed placeholders: `{{kind}}`, `{{total}}`, `{{low_threshold}}`, `{{recovery_threshold}}`, `{{consecutive_failures}}`, `{{error_code}}`, `{{unknown_plans}}`, `{{partial}}`, `{{unresolved_count}}`, `{{occurred_at}}`.
+
+Unknown event names or placeholders are rejected at config load. Subject must be a single line. Do not put real email addresses in YAML; recipients stay in `plugin.env`.
 
 ## Systemd Timer
 
@@ -130,19 +147,19 @@ sudo systemctl enable --now cpa-quota-alert-plugin.timer
 
 Replace `<actual-cpa-service>` with the real CPA systemd service name for that installation; this repository does not assume one. The CPA restart is what lets plugin registration see `plugin.env`. The oneshot service runs as `root` only so it can read the root-owned `0600` curl config that contains the Management Key. Its command is still only `curl --config /etc/cpa-quota-alert-plugin/curl.conf`. The curl config performs a POST with `{}` to the loopback protected Management endpoint and carries the fake example `X-Management-Key` placeholder. Replace it only inside the root-only local copy.
 
-After the CPA restart, verify `/var/lib/cpa-quota-alert-plugin` exists, is owned by the actual CPA service identity, has mode `0700`, and is writable by that service before VPS2 or VPS1 dry-run checks. Plugin state must not be world-readable. If the host systemd version or deployment policy does not support `StateDirectory`, create `/var/lib/cpa-quota-alert-plugin` manually, assign it to the actual CPA service user and group, and keep mode `0700`.
+After the CPA restart, verify `/var/lib/cpa-quota-alert-plugin` exists, is owned by the actual CPA service identity, has mode `0700`, and is writable by that service before enabling the timer. Plugin state must not be world-readable. If the host systemd version or deployment policy does not support `StateDirectory`, create `/var/lib/cpa-quota-alert-plugin` manually, assign it to the actual CPA service user and group, and keep mode `0700`.
 
-The unit keeps `UMask=0077`, `NoNewPrivileges=true`, and hardening that still permits loopback networking and reading the curl config. It is not a long-running service. VPS1 should only receive the plugin and timer assets; do not install an additional long-running service for this plugin.
+The unit keeps `UMask=0077`, `NoNewPrivileges=true`, and hardening that still permits loopback networking and reading the curl config. It is not a long-running service. Install only the plugin and timer assets; do not add another long-running quota service on the CPA host.
 
 ## Rollout Order
 
-1. Validate the state directory ownership, mode, and write permission before dry-run checks.
-2. Use the already validated isolated CPA behavior as the minimum bar before VPS1.
-3. Move the plugin to VPS1 only after public release assets and checksums are available.
-4. Run three VPS1 production dry-run checks and compare with the existing monitoring view.
-5. Rehearse rollback before enabling real notification delivery.
-6. Call `test-notification` only after dry-run results are stable.
-7. Enable real notification delivery only after the operator confirms the test notification.
+1. Validate the state directory ownership, mode, and write permission.
+2. Load the plugin with `dry_run: true` and confirm CPA logs `plugin registered`.
+3. Run a few timer or Management `check` calls and compare totals with your existing quota view.
+4. Fill root-only `plugin.env` and restart CPA.
+5. Call `test-notification` with `dry_run: false` and confirm the generic test mail arrives.
+6. Set `dry_run: false` in plugin YAML and enable the timer.
+7. If another quota mailer is still running, disable it first so you do not get duplicate mail.
 
 ## Rollback
 

@@ -111,6 +111,13 @@ func TestNormalCheckSavesPendingBeforeSendingAndReturnsAggregate(t *testing.T) {
 	if got := h.sender("smtp").sentCount(); got != 1 {
 		t.Fatalf("smtp sends=%d", got)
 	}
+	sent := h.sender("smtp").last()
+	if sent.Subject != "[CPA quota] remaining 1.00 Plus-week equivalents" {
+		t.Fatalf("templated subject=%q", sent.Subject)
+	}
+	if strings.Contains(sent.Body, "@") || strings.Contains(strings.ToLower(sent.Body), "vps") {
+		t.Fatalf("mail leaked operator-specific text: %q", sent.Body)
+	}
 	if got := h.sender("webhook").sentCount(); got != 1 {
 		t.Fatalf("webhook sends=%d", got)
 	}
@@ -622,4 +629,10 @@ func (s *fakeSender) sentCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.sent)
+}
+
+func (s *fakeSender) last() notify.Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sent[len(s.sent)-1]
 }

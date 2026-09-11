@@ -113,21 +113,22 @@ func Evaluate(current State, input Input, now time.Time) State {
 	if next.PlanChangedActive {
 		next.PlanChangedActive = false
 	}
+	summary := quotaSummary(input.Snapshot)
 
 	switch {
 	case total < input.LowThreshold:
 		if !next.LowActive {
 			next.LowActive = true
-			appendEvent(&next, EventLow, now, input.Channels, map[string]any{"total": total})
+			appendEvent(&next, EventLow, now, input.Channels, summary)
 		} else if !next.LastLowDeliveredAt.IsZero() && now.Sub(next.LastLowDeliveredAt) >= time.Duration(input.ReminderSeconds)*time.Second {
 			if !hasPendingKind(next.PendingEvents, EventLowReminder) {
-				appendEvent(&next, EventLowReminder, now, input.Channels, map[string]any{"total": total})
+				appendEvent(&next, EventLowReminder, now, input.Channels, summary)
 			}
 		}
 	case total >= input.RecoveryThreshold:
 		if next.LowActive {
 			next.LowActive = false
-			appendEvent(&next, EventRecovery, now, input.Channels, map[string]any{"total": total})
+			appendEvent(&next, EventRecovery, now, input.Channels, summary)
 		}
 	default:
 	}
@@ -165,6 +166,21 @@ func MarkDelivered(current State, eventID, channel string, delivered bool, now t
 
 func DryRun(current State, input Input, now time.Time) State {
 	return Evaluate(cloneState(current), input, now)
+}
+
+func quotaSummary(snapshot *quota.Snapshot) map[string]any {
+	if snapshot == nil {
+		return map[string]any{}
+	}
+	unresolved := 0
+	for _, count := range snapshot.UnresolvedCodeCounts {
+		unresolved += count
+	}
+	return map[string]any{
+		"total":            snapshot.Total,
+		"partial":          snapshot.Partial,
+		"unresolved_count": unresolved,
+	}
 }
 
 func appendEvent(state *State, kind string, now time.Time, channels []string, summary map[string]any) {

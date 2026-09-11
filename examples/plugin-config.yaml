@@ -46,6 +46,24 @@ smtp:
   from_env: CPA_QUOTA_ALERT_SMTP_FROM
   from_name: CPA Quota Alert
 
+# Optional. Omit this block to use the built-in public-safe English templates.
+# Recipients, SMTP user, and From stay in plugin.env, not here.
+mail:
+  templates:
+    low:
+      subject: "[CPA quota] remaining {{total}} Plus-week equivalents"
+      body: |
+        CPA quota is below the configured low threshold.
+
+        Remaining: {{total}}
+        Low threshold: {{low_threshold}}
+        Recovery threshold: {{recovery_threshold}}
+        Partial snapshot: {{partial}}
+        Unresolved accounts: {{unresolved_count}}
+        Occurred at (UTC): {{occurred_at}}
+
+        This message contains aggregate totals only.
+
 webhook:
   enabled: false
   method: POST

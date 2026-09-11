@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-This repository is a v0.1 release candidate and has no supported production release yet.
+This repository publishes Linux amd64 plugin builds. Treat each release as operator-installed software: verify the checksum, review local config, and keep secrets out of Git.
 
 ## Native Plugin Risk
 

@@ -12,7 +12,7 @@ This repository is the public project harness for `cpa-quota-alert-plugin`, an M
 - Minimum CPA compatibility target: `v7.2.83`
 - Additional compatibility target: `v7.2.120`, `v7.2.157`
 - First release target: Linux amd64 `.so` plus SHA-256 checksum
-- Current phase: v0.1 release candidate; implementation and isolated CPA validation are complete, with production rollout gates still open
+- Current phase: v0.1.2; public-safe mail templates and operator-configurable `mail.templates` are part of the plugin contract
 
 ## Scope Rules
 
@@ -46,7 +46,7 @@ Before claiming completion, run the narrow verification that matches the current
 - `go vet ./...`
 - `scripts/verify.ps1` on Windows
 
-Release-candidate evidence is recorded in `docs/iterations/ITERATION-002.md`. Public GitHub CI, `v0.1.0` tag/release publication, VPS1 three-round production dry-run, and rollback rehearsal remain release gates.
+Verification evidence lives in `docs/iterations/ITERATION-002.md`. Keep mail templates public-safe; do not commit recipients, SMTP passwords, hostnames, or account identifiers.
 
 ## Git Discipline
 

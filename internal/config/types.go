@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -98,6 +99,16 @@ type Config struct {
 	AllowedQuotaHosts     HostSet
 	SMTP                  SMTPConfig
 	Webhook               WebhookConfig
+	Mail                  MailConfig
+}
+
+type MailTemplate struct {
+	Subject string
+	Body    string
+}
+
+type MailConfig struct {
+	Templates map[string]MailTemplate
 }
 
 func Parse(raw map[string]any, getenv Getenv) (Config, error) {
@@ -201,6 +212,16 @@ func Parse(raw map[string]any, getenv Getenv) (Config, error) {
 			return Config{}, errors.New("webhook must be an object")
 		}
 		cfg.Webhook, err = parseWebhook(webhookRaw)
+		if err != nil {
+			return Config{}, err
+		}
+	}
+	if mailValue, exists := raw["mail"]; exists {
+		mailRaw, ok := objectValue(mailValue)
+		if !ok {
+			return Config{}, errors.New("mail must be an object")
+		}
+		cfg.Mail, err = parseMail(mailRaw)
 		if err != nil {
 			return Config{}, err
 		}
@@ -478,6 +499,79 @@ func parseSMTP(raw map[string]any) (SMTPConfig, error) {
 		}
 	}
 	return cfg, nil
+}
+
+var mailPlaceholderPattern = regexp.MustCompile(`\{\{\s*([a-z_]+)\s*\}\}`)
+
+var allowedMailKinds = map[string]struct{}{
+	"low": {}, "low_reminder": {}, "recovery": {}, "data_error": {}, "plan_changed": {}, "test_notification": {},
+}
+
+var allowedMailPlaceholders = map[string]struct{}{
+	"kind": {}, "total": {}, "low_threshold": {}, "recovery_threshold": {},
+	"consecutive_failures": {}, "error_code": {}, "unknown_plans": {},
+	"partial": {}, "unresolved_count": {}, "occurred_at": {},
+}
+
+func parseMail(raw map[string]any) (MailConfig, error) {
+	if err := rejectUnknownFields(raw, "mail", map[string]struct{}{"templates": {}}); err != nil {
+		return MailConfig{}, err
+	}
+	cfg := MailConfig{Templates: map[string]MailTemplate{}}
+	templatesValue, exists := raw["templates"]
+	if !exists {
+		return cfg, nil
+	}
+	templatesRaw, ok := objectValue(templatesValue)
+	if !ok {
+		return MailConfig{}, errors.New("mail.templates must be an object")
+	}
+	for kind, value := range templatesRaw {
+		if _, allowed := allowedMailKinds[kind]; !allowed {
+			return MailConfig{}, fmt.Errorf("mail.templates.%s is not a supported event kind", kind)
+		}
+		itemRaw, ok := objectValue(value)
+		if !ok {
+			return MailConfig{}, fmt.Errorf("mail.templates.%s must be an object", kind)
+		}
+		if err := rejectUnknownFields(itemRaw, "mail.templates."+kind, map[string]struct{}{"subject": {}, "body": {}}); err != nil {
+			return MailConfig{}, err
+		}
+		var err error
+		tmpl := MailTemplate{}
+		if tmpl.Subject, err = readString(itemRaw, "subject", ""); err != nil {
+			return MailConfig{}, fmt.Errorf("mail.templates.%s.subject: %w", kind, err)
+		}
+		if tmpl.Body, err = readString(itemRaw, "body", ""); err != nil {
+			return MailConfig{}, fmt.Errorf("mail.templates.%s.body: %w", kind, err)
+		}
+		if err := validateMailTemplateText("mail.templates."+kind+".subject", tmpl.Subject, true); err != nil {
+			return MailConfig{}, err
+		}
+		if err := validateMailTemplateText("mail.templates."+kind+".body", tmpl.Body, false); err != nil {
+			return MailConfig{}, err
+		}
+		cfg.Templates[kind] = tmpl
+	}
+	return cfg, nil
+}
+
+func validateMailTemplateText(field, value string, subject bool) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%s must be non-empty", field)
+	}
+	if strings.ContainsRune(value, '\r') {
+		return fmt.Errorf("%s must not contain CR", field)
+	}
+	if subject && strings.ContainsRune(value, '\n') {
+		return fmt.Errorf("%s must be a single line", field)
+	}
+	for _, match := range mailPlaceholderPattern.FindAllStringSubmatch(value, -1) {
+		if _, ok := allowedMailPlaceholders[match[1]]; !ok {
+			return fmt.Errorf("%s contains unknown placeholder {{%s}}", field, match[1])
+		}
+	}
+	return nil
 }
 
 func parseWebhook(raw map[string]any) (WebhookConfig, error) {
