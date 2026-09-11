@@ -10,7 +10,7 @@ This repository is the public project harness for `cpa-quota-alert-plugin`, an M
 - Runtime dependency policy: Go standard library plus `gopkg.in/yaml.v3 v3.0.1`
 - Plugin target: CLIProxyAPI C ABI v1 native plugin
 - Minimum CPA compatibility target: `v7.2.83`
-- Additional compatibility target: `v7.2.120`
+- Additional compatibility target: `v7.2.120`, `v7.2.157`
 - First release target: Linux amd64 `.so` plus SHA-256 checksum
 - Current phase: v0.1 release candidate; implementation and isolated CPA validation are complete, with production rollout gates still open
 

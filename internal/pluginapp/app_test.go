@@ -156,7 +156,7 @@ func TestLifecycleRequestIsStrict(t *testing.T) {
 
 func TestLifecycleSchemaVersionsAndUnsupportedReconfigure(t *testing.T) {
 	app := New(func(string) string { return "" })
-	for _, schema := range []uint32{1, 2} {
+	for _, schema := range []uint32{1, 2, 3, 4, 5, 6} {
 		response, code := app.Call(MethodPluginRegister, lifecycleJSONSchema(t, schema, "concurrency: 2\n"))
 		env := decodeEnvelope(t, response)
 		if code != 0 || !env.OK {
@@ -173,7 +173,7 @@ func TestLifecycleSchemaVersionsAndUnsupportedReconfigure(t *testing.T) {
 	if _, code := app.Call(MethodPluginRegister, lifecycleJSONSchema(t, 0, "concurrency: 4\n")); code != 0 {
 		t.Fatal("schema 0 compatibility register failed")
 	}
-	raw, code := app.Call(MethodPluginReconfigure, lifecycleJSONSchema(t, 3, "concurrency: 9\n"))
+	raw, code := app.Call(MethodPluginReconfigure, lifecycleJSONSchema(t, HostSchemaVersionCPA72157+1, "concurrency: 9\n"))
 	if code == 0 || decodeEnvelope(t, raw).Error.Code != "invalid_config" {
 		t.Fatalf("unsupported schema accepted: code=%d raw=%s", code, raw)
 	}

@@ -12,7 +12,7 @@
 - 运行时依赖：Go 标准库与 `gopkg.in/yaml.v3 v3.0.1`
 - 插件目标：CLIProxyAPI C ABI v1
 - 最低 CPA 兼容目标：`v7.2.83`
-- 追加兼容目标：`v7.2.120`
+- 追加兼容目标：`v7.2.120`、`v7.2.157`
 - 首个发布目标：Linux amd64 `.so` 与 SHA-256 checksum
 
 当前已实现：严格 YAML/配置校验、类型化 Host Callback、Codex 凭据发现与额度查询、额度聚合、告警状态机、原子状态存储、插件生命周期、Linux C ABI exports、受保护 Management handlers、SMTP/Webhook 发送、公开安全示例配置和 systemd timer 资产。
