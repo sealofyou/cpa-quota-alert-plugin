@@ -18,7 +18,7 @@ const (
 	MethodPluginShutdown    = "plugin.shutdown"
 
 	SchemaVersion = 1
-	PluginVersion = "0.1.2"
+	PluginVersion = "0.1.3"
 
 	// HostSchemaVersionCPA72157 is the RPC schema that official CPA v7.2.157
 	// sends on plugin.register. The register payload shape is still
