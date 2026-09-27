@@ -6,7 +6,7 @@ This is not an OpenAI official project and not a CLIProxyAPI official project.
 
 ## Status
 
-- Version: `0.1.2`
+- Version: `0.1.3`
 - License: MIT
 - Language: Go
 - Runtime dependencies: Go standard library plus `gopkg.in/yaml.v3 v3.0.1`

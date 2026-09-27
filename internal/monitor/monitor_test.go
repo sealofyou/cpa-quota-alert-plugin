@@ -155,3 +155,46 @@ func TestPlanChangedSummaryDeepCopied(t *testing.T) {
 		t.Fatalf("dry-run state should deep-copy pending summaries: %+v", dryGot)
 	}
 }
+
+func TestPartialLowDoesNotTriggerLowOrRecovery(t *testing.T) {
+	now := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
+	st := Evaluate(State{}, Input{Snapshot: snapshot(19.8), Channels: []string{"smtp"}}, now)
+	partial := snapshot(0.8)
+	partial.Partial = true
+	partial.UnresolvedCodeCounts = map[string]int{"host_http_error": 1}
+	st = Evaluate(st, Input{Snapshot: partial, Channels: []string{"smtp"}}, now.Add(time.Minute))
+	if st.LowActive || len(st.PendingEvents) != 0 || st.LastValidTotal != 19.8 || !st.LastValidAt.Equal(now) {
+		t.Fatalf("partial subtotal must not become a low or replace last complete total: %+v", st)
+	}
+	st = Evaluate(st, Input{Snapshot: snapshot(19.8), Channels: []string{"smtp"}}, now.Add(2*time.Minute))
+	if st.LowActive || len(st.PendingEvents) != 0 {
+		t.Fatalf("complete recovery after partial subtotal must stay quiet: %+v", st)
+	}
+}
+
+func TestPartialLowDoesNotRepeatExistingLow(t *testing.T) {
+	now := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
+	st := Evaluate(State{}, Input{Snapshot: snapshot(0.8), Channels: []string{"smtp"}}, now)
+	if !st.LowActive || countKind(st.PendingEvents, EventLow) != 1 {
+		t.Fatalf("complete low snapshot must still alert: %+v", st)
+	}
+	st = MarkDelivered(st, st.PendingEvents[0].ID, "smtp", true, now.Add(time.Minute))
+	partial := snapshot(0.7)
+	partial.Partial = true
+	st = Evaluate(st, Input{Snapshot: partial, Channels: []string{"smtp"}}, now.Add(25*time.Hour))
+	if !st.LowActive || len(st.PendingEvents) != 0 {
+		t.Fatalf("partial subtotal must not trigger low reminder: %+v", st)
+	}
+}
+
+func TestPartialHighCanProveRecovery(t *testing.T) {
+	now := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
+	st := Evaluate(State{}, Input{Snapshot: snapshot(0.8), Channels: []string{"smtp"}}, now)
+	st = MarkDelivered(st, st.PendingEvents[0].ID, "smtp", true, now.Add(time.Minute))
+	partial := snapshot(2.0)
+	partial.Partial = true
+	st = Evaluate(st, Input{Snapshot: partial, Channels: []string{"smtp"}}, now.Add(2*time.Minute))
+	if st.LowActive || countKind(st.PendingEvents, EventRecovery) != 1 || st.LastValidTotal != 0.8 {
+		t.Fatalf("known subtotal above recovery threshold proves recovery without replacing complete total: %+v", st)
+	}
+}
