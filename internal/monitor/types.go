@@ -108,10 +108,17 @@ func Evaluate(current State, input Input, now time.Time) State {
 	next.ConsecutiveFailures = 0
 	next.ErrorActive = false
 	next.LastErrorCode = ""
-	next.LastValidTotal = total
-	next.LastValidAt = now
+	if !input.Snapshot.Partial {
+		next.LastValidTotal = total
+		next.LastValidAt = now
+	}
 	if next.PlanChangedActive {
 		next.PlanChangedActive = false
+	}
+	// A partial total is a lower bound. Below the recovery threshold it
+	// cannot prove that the full pool is low or that a reminder is due.
+	if input.Snapshot.Partial && total < input.RecoveryThreshold {
+		return next
 	}
 	summary := quotaSummary(input.Snapshot)
 
