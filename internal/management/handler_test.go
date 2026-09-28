@@ -19,7 +19,7 @@ import (
 	"github.com/sealofyou/cpa-quota-alert-plugin/internal/quota"
 )
 
-func TestRegisterReturnsProtectedRoutesAndEmptyResources(t *testing.T) {
+func TestRegisterReturnsProtectedRoutesAndUIResource(t *testing.T) {
 	h := newTestHandler(t)
 	raw, code := h.Call(context.Background(), MethodManagementRegister, nil)
 	if code != 0 {
@@ -27,13 +27,17 @@ func TestRegisterReturnsProtectedRoutesAndEmptyResources(t *testing.T) {
 	}
 	var got Registration
 	decodeJSON(t, raw, &got)
-	if len(got.Resources) != 0 {
-		t.Fatalf("resources must be empty: %+v", got.Resources)
+	if len(got.Resources) != 1 || got.Resources[0].Path != "/ui" || got.Resources[0].Menu == "" {
+		t.Fatalf("resource registration: %+v", got.Resources)
 	}
 	want := []Route{
 		{Method: "POST", Path: "/cpa-quota-alert/check", Description: "Run a CPA quota check."},
 		{Method: "GET", Path: "/cpa-quota-alert/status", Description: "Read CPA quota alert status."},
 		{Method: "POST", Path: "/cpa-quota-alert/test-notification", Description: "Send a CPA quota alert test notification."},
+		{Method: "GET", Path: "/cpa-quota-alert/effective-config", Description: "Read active non-secret quota alert settings."},
+		{Method: "GET", Path: "/cpa-quota-alert/secrets", Description: "Read configured notification value names."},
+		{Method: "PUT", Path: "/cpa-quota-alert/secrets", Description: "Save notification values in private plugin storage."},
+		{Method: "POST", Path: "/cpa-quota-alert/validate", Description: "Validate quota alert settings before saving."},
 	}
 	if len(got.Routes) != len(want) {
 		t.Fatalf("routes=%+v", got.Routes)

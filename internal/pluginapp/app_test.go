@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -12,7 +13,51 @@ import (
 	"github.com/sealofyou/cpa-quota-alert-plugin/internal/abi"
 	"github.com/sealofyou/cpa-quota-alert-plugin/internal/config"
 	"github.com/sealofyou/cpa-quota-alert-plugin/internal/management"
+	"github.com/sealofyou/cpa-quota-alert-plugin/internal/secrets"
 )
+
+func TestNotificationValuesSavedByUIAreUsedWithoutRestart(t *testing.T) {
+	app := New(func(string) string { return "" })
+	app.secretStore = &secrets.Store{Path: filepath.Join(t.TempDir(), "private", "notification-secrets.json")}
+	values := map[string]string{"SMTP_USERNAME": "test-user", "SMTP_PASSWORD": "test-password", "SMTP_RECIPIENTS": "one@example.com", "SMTP_FROM": "sender@example.com"}
+	if err := app.secretStore.Update(values, nil); err != nil {
+		t.Fatal(err)
+	}
+	yaml := strings.Join([]string{
+		"dry_run: true", "state_path: " + strings.ReplaceAll(filepath.Join(t.TempDir(), "state.json"), `\`, `/`),
+		"smtp:", "  enabled: true", "  host: smtp.example.invalid", "  port: 587",
+		"  username_env: SMTP_USERNAME", "  password_env: SMTP_PASSWORD",
+		"  recipients_env: SMTP_RECIPIENTS", "  from_env: SMTP_FROM", "",
+	}, "\n")
+	if raw, code := app.Call(MethodPluginRegister, lifecycleJSON(t, yaml)); code != 0 {
+		t.Fatalf("register with private values failed: %s", raw)
+	}
+	readRecipients := func() float64 {
+		t.Helper()
+		raw, code := app.Call(management.MethodManagementHandle, managementRequestJSON(t, "GET", "/cpa-quota-alert/status", nil, "test"))
+		if code != 0 {
+			t.Fatalf("status call: %s", raw)
+		}
+		var response management.Response
+		if err := json.Unmarshal(decodeEnvelope(t, raw).Result, &response); err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(response.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		return body["channels"].([]any)[0].(map[string]any)["recipient_count"].(float64)
+	}
+	if got := readRecipients(); got != 1 {
+		t.Fatalf("recipient count=%v", got)
+	}
+	if err := app.secretStore.Update(map[string]string{"SMTP_RECIPIENTS": "one@example.com,two@example.com"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := readRecipients(); got != 2 {
+		t.Fatalf("updated recipient count=%v", got)
+	}
+}
 
 func TestRegisterReturnsMetadataAndStoresConfig(t *testing.T) {
 	app := New(func(string) string { return "" })
@@ -205,8 +250,12 @@ func TestManagementRegisterAndHandleArePluginEnveloped(t *testing.T) {
 		{Method: "POST", Path: "/cpa-quota-alert/check", Description: "Run a CPA quota check."},
 		{Method: "GET", Path: "/cpa-quota-alert/status", Description: "Read CPA quota alert status."},
 		{Method: "POST", Path: "/cpa-quota-alert/test-notification", Description: "Send a CPA quota alert test notification."},
+		{Method: "GET", Path: "/cpa-quota-alert/effective-config", Description: "Read active non-secret quota alert settings."},
+		{Method: "GET", Path: "/cpa-quota-alert/secrets", Description: "Read configured notification value names."},
+		{Method: "PUT", Path: "/cpa-quota-alert/secrets", Description: "Save notification values in private plugin storage."},
+		{Method: "POST", Path: "/cpa-quota-alert/validate", Description: "Validate quota alert settings before saving."},
 	}
-	if len(reg.Resources) != 0 || len(reg.Routes) != len(want) {
+	if len(reg.Resources) != 1 || reg.Resources[0].Path != "/ui" || len(reg.Routes) != len(want) {
 		t.Fatalf("unexpected registration: %+v", reg)
 	}
 	for i := range want {
