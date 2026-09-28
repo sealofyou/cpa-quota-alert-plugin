@@ -16,8 +16,10 @@ Let an operator configure quota alerts from the CPA Management sidebar without e
 
 - Windows `scripts/verify.ps1`: passed (structure, public-safety scan, Go tests, vet).
 - Browser mock: desktop and narrow-screen rendering, rule row insertion, config load, save/readback, and notification value non-echo passed. The narrow-screen overflow found in the first visual check was corrected.
-- Linux `make linux-release-gate`: pending.
-- VPS1 production resource and service readback: pending.
+- Linux Go tests, vet, race check, and c-shared `.so` build: passed in a VPS1 Go container.
+- VPS1 production: v0.2.0 registered; deployed `.so` SHA-256 `676754fae5d14cfd4a24f499ef0d355165a72f5cecb46f7391163918d85aadde`; CPA and timer active with `NRestarts=0`. The UI resource returned 200, unauthenticated protected routes and `/v1/models` returned 401, and authenticated config/status/effective-config/secret-name routes returned 200. Scheduled checks at 11:50 and 11:55 UTC were complete; the status route reported `stale=false` and `failure_count=0`.
+- Existing saved rules and active rules matched after sorting. The active view adds an empty mail-template object absent from the saved YAML, so raw JSON equality is not a valid no-change check for those two fields.
+- The rollout shell stream had an extra CR after its success marker and exited 1; independent post-rollout readback confirmed the new binary, healthy services, protected routes, and real scheduled checks.
 
 ## Operational boundary
 
