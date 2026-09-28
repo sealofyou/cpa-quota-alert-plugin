@@ -19,6 +19,8 @@ Do not commit secrets, real host addresses, real recipient addresses, account id
 
 The plugin must not receive or store the CPA Management Key. Codex access material should exist only in memory for a single quota query and must not be written to state, logs, responses, or examples.
 
+The CPA settings page is an unauthenticated static resource; it must contain no operator configuration or credentials. Its data requests use CPA's authenticated Management API. Notification values saved through the page are kept in a private service-account directory and are never returned by the API. Protect backups of this file as credentials.
+
 ## Reporting
 
 Use GitHub Security Advisories or private vulnerability reporting when available. Do not publish exploit details, credentials, or production configuration in public issues.

@@ -6,7 +6,7 @@
 
 ## 状态
 
-- 版本：`0.1.5`
+- 版本：`0.2.0`
 - 许可证：MIT
 - 语言：Go
 - 运行时依赖：Go 标准库与 `gopkg.in/yaml.v3 v3.0.1`
@@ -14,7 +14,7 @@
 - 兼容：`v7.2.83`、`v7.2.120`、`v7.2.157`
 - 发布资产：GitHub Release 上的 Linux amd64 `.so` 与 SHA-256 checksum
 
-插件会在 CPA 内注册、检查 Codex 额度，并可通过 SMTP 或 Webhook 发信。邮件正文是公开安全模板，只含汇总数字。收件人和 SMTP 密钥只放本机 root-only env，不进本仓库。安装前请核对 GitHub Release 里的 checksum。
+插件会在 CPA 内注册、检查 Codex 额度，并可通过 SMTP 或 Webhook 发信。邮件正文是公开安全模板，只含汇总数字。收件人和通知密钥保存在主机私有文件或 root-only env，不进本仓库。安装前请核对 GitHub Release 里的 checksum。
 
 ## 计划行为
 
@@ -58,9 +58,17 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 
 ## 配置
 
+### CPA 管理台配置页
+
+在 CPA 管理台左侧打开 **Quota Alerts**，也可直接访问 `/v0/resource/plugins/cpa-quota-alert-plugin/ui`。输入 CPA 管理密钥后，可在页面里设置告警阈值、套餐折算、SMTP、Webhook、邮件文案和高级查询参数。管理密钥只留在当前页面内存，刷新后需要重新输入。普通配置通过 CPA 的受保护接口保存；页面会回读 CPA 保存值和插件实际生效值，确认两边一致才显示成功。
+
+页面填写的通知值通过受保护接口写入私有文件。systemd 配置了 `StateDirectory` 时路径为 `$STATE_DIRECTORY/notification-secrets.json`；否则在 CPA 服务账号的用户配置目录下使用 `cpa-quota-alert-plugin/notification-secrets.json`。Linux 上目录须私有，文件为 `0600`。接口只返回哪些环境变量名已有存储值，不回显值。私有文件的值优先于同名环境变量；清除私有值后继续回退到现有环境变量。备份插件时也要以凭据级权限备份这个文件。管理密钥不写入该文件。
+
+页面先校验整份候选配置，再保存并等待 CPA 异步重载。如果提示“已保存但尚未确认生效”，应检查插件状态，不能把 HTTP 200 当成生效。修改通知凭据会立刻影响运行中的插件，建议在低流量时操作。
+
 公开保守基线见 `examples/plugin-config.yaml`：
 
-- 默认 `dry_run: true`。只有 SMTP env 和测试邮件都通了，才把 `dry_run` 改成 `false`
+- 默认 `dry_run: true`。只有通知值和测试通知都通了，才把 `dry_run` 改成 `false`
 - 只包含 Plus 与 Team，均为 `7d` 窗口 `1x`
 - Free 忽略
 - 终态码：`token_invalidated`、`token_revoked`、`deactivated_workspace`
@@ -75,11 +83,11 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 
 ### SMTP 和收件人
 
-通知密钥只通过插件 YAML 里的环境变量名间接引用。把 `deploy/systemd/plugin.env.example` 复制到 `/etc/cpa-quota-alert-plugin/plugin.env` 这类不入 Git 的 root-only 路径，设置 owner `root:root`、mode `0600`。真实 SMTP 用户、密码、发件人和收件人只写这个文件，仓库示例必须保持虚构。
+通知密钥只通过插件 YAML 里的环境变量名间接引用。可以在 CPA 配置页填写通知值。现有 env 部署仍兼容：把 `deploy/systemd/plugin.env.example` 复制到 `/etc/cpa-quota-alert-plugin/plugin.env` 这类不入 Git 的 root-only 路径，设置 owner `root:root`、mode `0600`。采用 env 方式时，真实 SMTP 用户、密码、发件人和收件人写在这个私有文件；仓库示例必须保持虚构。
 
 把 `deploy/systemd/cpa-service-plugin-env.conf.example` 安装成实际 CPA systemd service 的 drop-in。改完通知值后要 `systemctl daemon-reload` 并受控重启 CPA。oneshot timer 不读 `plugin.env`。
 
-CPA Management Key 不得进入 `ExecStart`、CPA 插件 YAML、环境变量、README 命令行、日志或插件 state。它只能放在从 `deploy/systemd/curl.conf.example` 复制出来的 root-owned `0600` curl config 中。
+CPA Management Key 不得进入 `ExecStart`、CPA 插件 YAML、环境变量、README 命令行、日志或插件 state。配置页只在当前浏览器会话里使用它；timer 使用从 `deploy/systemd/curl.conf.example` 复制出来的 root-owned `0600` curl config。
 
 ### 邮件模板
 
@@ -102,7 +110,7 @@ mail:
 
 可用占位符：`{{kind}}`、`{{total}}`、`{{low_threshold}}`、`{{recovery_threshold}}`、`{{consecutive_failures}}`、`{{error_code}}`、`{{unknown_plans}}`、`{{partial}}`、`{{unresolved_count}}`、`{{occurred_at}}`。
 
-未知事件名或占位符会在加载配置时被拒绝。主题必须是单行。不要把真实邮箱写进 YAML；收件人只放 `plugin.env`。
+未知事件名或占位符会在加载配置时被拒绝。主题必须是单行。不要把真实邮箱写进 YAML；收件人保存在插件私有文件或 `plugin.env`。
 
 ## systemd 安装
 

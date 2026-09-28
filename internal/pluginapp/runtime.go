@@ -26,6 +26,9 @@ func newRuntimeHandler(app *App, getenv config.Getenv, hostFactory HostClientFac
 		CheckerFactory: runtimeCheckerFactory{hostFactory: hostFactory},
 		StoreFactory:   runtimeStoreFactory{},
 		ChannelFactory: runtimeChannelFactory{getenv: getenv},
+		SecretStore:    app.secretStore,
+		Getenv:         getenv,
+		BaseGetenv:     app.getenv,
 		Version:        PluginVersion,
 	})
 }

@@ -21,7 +21,7 @@ const (
 	MethodManagementRegister = "management.register"
 	MethodManagementHandle   = "management.handle"
 
-	PluginVersion = "0.1.4"
+	PluginVersion = "0.2.0"
 
 	MaxRequestBodyBytes       = 64 * 1024
 	MaxManagementRequestBytes = MaxRequestBodyBytes*2 + 4096
@@ -49,12 +49,23 @@ type Route struct {
 }
 
 type Registration struct {
-	Routes    []Route  `json:"routes"`
-	Resources []string `json:"resources"`
+	Routes    []Route    `json:"routes"`
+	Resources []Resource `json:"resources"`
+}
+
+type Resource struct {
+	Path        string
+	Menu        string
+	Description string
 }
 
 type ConfigProvider interface {
 	Current(context.Context) (config.Config, bool)
+}
+
+type SecretStore interface {
+	Names() ([]string, error)
+	Update(map[string]string, []string) error
 }
 
 type Checker interface {
@@ -95,6 +106,9 @@ type Dependencies struct {
 	ChannelFactory ChannelFactory
 	Clock          Clock
 	Version        string
+	SecretStore    SecretStore
+	Getenv         config.Getenv
+	BaseGetenv     config.Getenv
 }
 
 type Handler struct {
@@ -132,7 +146,7 @@ func (h *Handler) Call(ctx context.Context, method string, request []byte) (resp
 	}
 	switch method {
 	case MethodManagementRegister:
-		return mustJSON(Registration{Routes: protectedRoutes(), Resources: []string{}}), 0
+		return mustJSON(Registration{Routes: protectedRoutes(), Resources: []Resource{{Path: "/ui", Menu: "Quota Alerts", Description: "Configure CPA quota alerts."}}}), 0
 	case MethodManagementHandle:
 		return marshalResponse(h.handle(ctx, request)), 0
 	case "":
@@ -147,6 +161,10 @@ func protectedRoutes() []Route {
 		{Method: "POST", Path: "/cpa-quota-alert/check", Description: "Run a CPA quota check."},
 		{Method: "GET", Path: "/cpa-quota-alert/status", Description: "Read CPA quota alert status."},
 		{Method: "POST", Path: "/cpa-quota-alert/test-notification", Description: "Send a CPA quota alert test notification."},
+		{Method: "GET", Path: "/cpa-quota-alert/effective-config", Description: "Read active non-secret quota alert settings."},
+		{Method: "GET", Path: "/cpa-quota-alert/secrets", Description: "Read configured notification value names."},
+		{Method: "PUT", Path: "/cpa-quota-alert/secrets", Description: "Save notification values in private plugin storage."},
+		{Method: "POST", Path: "/cpa-quota-alert/validate", Description: "Validate quota alert settings before saving."},
 	}
 }
 
@@ -178,6 +196,23 @@ func (h *Handler) handle(ctx context.Context, raw []byte) Response {
 			return errorResponse(405, "method_not_allowed")
 		}
 		return h.testNotification(ctx, req)
+	case "/cpa-quota-alert/effective-config":
+		if req.Method != "GET" {
+			return errorResponse(405, "method_not_allowed")
+		}
+		return h.effectiveConfig(ctx)
+	case "/cpa-quota-alert/secrets":
+		return h.secrets(ctx, req)
+	case "/cpa-quota-alert/validate":
+		if req.Method != "POST" {
+			return errorResponse(405, "method_not_allowed")
+		}
+		return h.validateSettings(req)
+	case "/v0/resource/plugins/cpa-quota-alert-plugin/ui":
+		if req.Method != "GET" {
+			return errorResponse(405, "method_not_allowed")
+		}
+		return uiResponse()
 	default:
 		return errorResponse(404, "not_found")
 	}
@@ -673,7 +708,7 @@ func cloneDelivery(in map[string]string) map[string]string {
 }
 
 func jsonResponse(status int, body any) Response {
-	return Response{StatusCode: status, Headers: map[string][]string{"Content-Type": {"application/json"}}, Body: mustJSON(body)}
+	return Response{StatusCode: status, Headers: map[string][]string{"Content-Type": {"application/json"}, "Cache-Control": {"no-store"}}, Body: mustJSON(body)}
 }
 
 func errorResponse(status int, code string) Response {

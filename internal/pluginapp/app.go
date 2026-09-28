@@ -10,6 +10,7 @@ import (
 
 	"github.com/sealofyou/cpa-quota-alert-plugin/internal/config"
 	"github.com/sealofyou/cpa-quota-alert-plugin/internal/management"
+	"github.com/sealofyou/cpa-quota-alert-plugin/internal/secrets"
 )
 
 const (
@@ -18,7 +19,7 @@ const (
 	MethodPluginShutdown    = "plugin.shutdown"
 
 	SchemaVersion = 1
-	PluginVersion = "0.1.5"
+	PluginVersion = "0.2.0"
 
 	// HostSchemaVersionCPA72157 is the RPC schema that official CPA v7.2.157
 	// sends on plugin.register. The register payload shape is still
@@ -32,16 +33,17 @@ const (
 type ConfigParser func([]byte, config.Getenv) (config.Config, error)
 
 type App struct {
-	mu         sync.RWMutex
-	getenv     config.Getenv
-	parse      ConfigParser
-	handler    *management.Handler
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	current    config.Config
-	configured bool
-	closed     bool
+	mu          sync.RWMutex
+	getenv      config.Getenv
+	secretStore *secrets.Store
+	parse       ConfigParser
+	handler     *management.Handler
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	current     config.Config
+	configured  bool
+	closed      bool
 }
 
 type Envelope struct {
@@ -91,8 +93,9 @@ func New(getenv config.Getenv) *App {
 
 func NewWithHost(getenv config.Getenv, hostFactory HostClientFactory) *App {
 	ctx, cancel := context.WithCancel(context.Background())
-	app := &App{getenv: getenv, parse: config.ParseYAML, ctx: ctx, cancel: cancel}
-	handler, err := newRuntimeHandler(app, getenv, hostFactory)
+	store, _ := secrets.Default()
+	app := &App{getenv: getenv, secretStore: store, parse: config.ParseYAML, ctx: ctx, cancel: cancel}
+	handler, err := newRuntimeHandler(app, app.notificationEnv, hostFactory)
 	if err == nil {
 		app.handler = handler
 	}
@@ -198,7 +201,7 @@ func (a *App) configure(request []byte) error {
 	if parser == nil {
 		return errors.New("configuration parser is unavailable")
 	}
-	parsed, err := parser(req.ConfigYAML, a.getenv)
+	parsed, err := parser(req.ConfigYAML, a.notificationEnv)
 	if err != nil {
 		return err
 	}
@@ -212,6 +215,18 @@ func (a *App) configure(request []byte) error {
 	a.current = parsed
 	a.configured = true
 	return nil
+}
+
+func (a *App) notificationEnv(name string) string {
+	if a.secretStore != nil {
+		if value, found := a.secretStore.Lookup(name); found {
+			return value
+		}
+	}
+	if a.getenv != nil {
+		return a.getenv(name)
+	}
+	return ""
 }
 
 func (a *App) callManagement(method string, request []byte) ([]byte, int) {

@@ -6,7 +6,7 @@ This is not an OpenAI official project and not a CLIProxyAPI official project.
 
 ## Status
 
-- Version: `0.1.5`
+- Version: `0.2.0`
 - License: MIT
 - Language: Go
 - Runtime dependencies: Go standard library plus `gopkg.in/yaml.v3 v3.0.1`
@@ -14,7 +14,7 @@ This is not an OpenAI official project and not a CLIProxyAPI official project.
 - Compatibility: `v7.2.83`, `v7.2.120`, `v7.2.157`
 - Release asset: Linux amd64 `.so` with SHA-256 checksum on GitHub Releases
 
-The plugin registers with CPA, checks Codex quota, and can send SMTP or webhook notifications. Mail bodies are public-safe templates with aggregate totals only. Recipients and SMTP secrets stay in a root-only env file, never in this repository. Verify the `.so` checksum from the GitHub Release before installing.
+The plugin registers with CPA, checks Codex quota, and can send SMTP or webhook notifications. Mail bodies are public-safe templates with aggregate totals only. Recipients and notification secrets stay in a private host file or a root-only env file, never in this repository. Verify the `.so` checksum from the GitHub Release before installing.
 
 ## Intended Behavior
 
@@ -51,7 +51,8 @@ internal/quota/      plan rules and quota aggregation
 internal/monitor/    alert state machine and pending events
 internal/notify/     SMTP and webhook delivery
 internal/state/      atomic state persistence
-internal/management/ protected Management route handlers
+internal/management/ protected Management routes and CPA settings page
+internal/secrets/    private notification value storage
 testdata/            sanitized fixtures only
 deploy/systemd/      timer, oneshot service, CPA drop-in, and root-only config examples
 examples/            conservative fake configuration examples
@@ -76,9 +77,17 @@ Verification runs `gofmt -l`, `go test ./...`, and `go vet ./...` on every suppo
 
 ## Configuration
 
+### CPA settings page
+
+Open **Quota Alerts** in the CPA Management sidebar, or visit `/v0/resource/plugins/cpa-quota-alert-plugin/ui`. Enter the CPA Management Key for this page session, then edit alert thresholds, plan rules, SMTP, Webhook, mail templates, or advanced query settings. The page keeps the Management Key in memory only. It saves non-secret fields through CPA's protected plugin config API and checks both the saved config and the plugin's active settings before reporting success.
+
+Notification values entered on the page are sent only to a protected plugin Management route. With systemd `StateDirectory`, the plugin stores them at `$STATE_DIRECTORY/notification-secrets.json`; otherwise it uses the CPA service account's user config directory at `cpa-quota-alert-plugin/notification-secrets.json`. The directory must be private and the file is `0600` on Linux. Values are never returned to the page. A nonempty stored value overrides an environment variable with the same name; if no stored value exists, the existing environment variable is used. Clearing a stored value returns to that fallback. The CPA Management Key is never written to this file. Back up this private file alongside the plugin state before a production upgrade; restrict backup permissions as well.
+
+The page validates the complete candidate configuration before saving and reads back the active runtime configuration after CPA's asynchronous reload. If the page says “saved but not confirmed active”, inspect the CPA plugin status and correct the configuration before relying on the new settings. Saving notification values changes the values used by the running plugin immediately; arrange credential changes during a quiet period.
+
 Use `examples/plugin-config.yaml` as the public conservative baseline:
 
-- `dry_run: true` by default. Set `dry_run: false` only after SMTP env and a test notification work.
+- `dry_run: true` by default. Set `dry_run: false` only after the notification values and a test notification work.
 - Plus and Team only, both `1x` over `7d`
 - Free plans ignored
 - Terminal codes: `token_invalidated`, `token_revoked`, `deactivated_workspace`
@@ -93,11 +102,11 @@ Use `examples/operator-confirmed-pro20.yaml` only as a local-operator assumption
 
 ### SMTP and recipients
 
-Notification secrets are referenced only through env names in plugin YAML. Copy `deploy/systemd/plugin.env.example` to an ignored root-only path such as `/etc/cpa-quota-alert-plugin/plugin.env`, set owner `root:root`, and set mode `0600`. Put the real SMTP user, password, From, and recipients only in that file. Keep the committed example fake.
+Notification secrets are referenced only through env names in plugin YAML. You can enter their values in the CPA settings page. Existing env deployments remain supported: copy `deploy/systemd/plugin.env.example` to an ignored root-only path such as `/etc/cpa-quota-alert-plugin/plugin.env`, set owner `root:root`, and set mode `0600`. Put the real SMTP user, password, From, and recipients in that private file when using the env method. Keep the committed example fake.
 
 Install `deploy/systemd/cpa-service-plugin-env.conf.example` as a drop-in under the actual CPA systemd service. After changing notification values, run `systemctl daemon-reload` and restart CPA so the in-process plugin sees the new environment. The oneshot timer does not read `plugin.env`.
 
-The CPA Management Key must not be placed in `ExecStart`, CPA plugin YAML, environment variables, README command lines, logs, or plugin state. Put it only in the root-owned curl config copied from `deploy/systemd/curl.conf.example`, with mode `0600`.
+The CPA Management Key must not be placed in `ExecStart`, CPA plugin YAML, environment variables, README command lines, logs, or plugin state. The settings page accepts it for the current browser session only. For the timer, put it only in the root-owned curl config copied from `deploy/systemd/curl.conf.example`, with mode `0600`.
 
 ### Mail templates
 
@@ -119,7 +128,7 @@ Supported events: `low`, `low_reminder`, `recovery`, `data_error`, `plan_changed
 
 Allowed placeholders: `{{kind}}`, `{{total}}`, `{{low_threshold}}`, `{{recovery_threshold}}`, `{{consecutive_failures}}`, `{{error_code}}`, `{{unknown_plans}}`, `{{partial}}`, `{{unresolved_count}}`, `{{occurred_at}}`.
 
-Unknown event names or placeholders are rejected at config load. Subject must be a single line. Do not put real email addresses in YAML; recipients stay in `plugin.env`.
+Unknown event names or placeholders are rejected at config load. Subject must be a single line. Do not put real email addresses in YAML; recipients stay in the private notification store or `plugin.env`.
 
 ## Systemd Timer
 
