@@ -89,15 +89,7 @@ func Evaluate(current State, input Input, now time.Time) State {
 	}
 
 	if input.Err != nil {
-		next.ConsecutiveFailures++
-		next.LastErrorCode = stableErrorCode(input.Err)
-		if next.ConsecutiveFailures >= input.FailureAlertCount && !next.ErrorActive {
-			next.ErrorActive = true
-			appendEvent(&next, EventDataError, now, input.Channels, map[string]any{
-				"consecutive_failures": next.ConsecutiveFailures,
-				"error_code":           next.LastErrorCode,
-			})
-		}
+		markDataFailure(&next, stableErrorCode(input.Err), input, now)
 		return next
 	}
 	if input.Snapshot == nil {
@@ -105,10 +97,12 @@ func Evaluate(current State, input Input, now time.Time) State {
 	}
 
 	total := input.Snapshot.Total
-	next.ConsecutiveFailures = 0
-	next.ErrorActive = false
-	next.LastErrorCode = ""
-	if !input.Snapshot.Partial {
+	if input.Snapshot.Partial {
+		markDataFailure(&next, "partial_unresolved", input, now)
+	} else {
+		next.ConsecutiveFailures = 0
+		next.ErrorActive = false
+		next.LastErrorCode = ""
 		next.LastValidTotal = total
 		next.LastValidAt = now
 	}
@@ -140,6 +134,18 @@ func Evaluate(current State, input Input, now time.Time) State {
 	default:
 	}
 	return next
+}
+
+func markDataFailure(next *State, code string, input Input, now time.Time) {
+	next.ConsecutiveFailures++
+	next.LastErrorCode = code
+	if next.ConsecutiveFailures >= input.FailureAlertCount && !next.ErrorActive {
+		next.ErrorActive = true
+		appendEvent(next, EventDataError, now, input.Channels, map[string]any{
+			"consecutive_failures": next.ConsecutiveFailures,
+			"error_code":           code,
+		})
+	}
 }
 
 func MarkDelivered(current State, eventID, channel string, delivered bool, now time.Time) State {

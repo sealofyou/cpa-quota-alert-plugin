@@ -198,3 +198,37 @@ func TestPartialHighCanProveRecovery(t *testing.T) {
 		t.Fatalf("known subtotal above recovery threshold proves recovery without replacing complete total: %+v", st)
 	}
 }
+
+func TestPersistentPartialTriggersDataErrorWithoutLow(t *testing.T) {
+	now := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
+	st := Evaluate(State{}, Input{Snapshot: snapshot(19.8), Channels: []string{"smtp"}}, now)
+	partial := snapshot(0.8)
+	partial.Partial = true
+	partial.UnresolvedCodeCounts = map[string]int{"requesttimeout": 1}
+	for i := 1; i <= 4; i++ {
+		st = Evaluate(st, Input{Snapshot: partial, Channels: []string{"smtp"}}, now.Add(time.Duration(i)*time.Minute))
+	}
+	if st.LowActive || st.LastValidTotal != 19.8 || !st.LastValidAt.Equal(now) {
+		t.Fatalf("partial totals must not become a low or overwrite the last complete total: %+v", st)
+	}
+	if st.ConsecutiveFailures != 4 || !st.ErrorActive || countKind(st.PendingEvents, EventDataError) != 1 || countKind(st.PendingEvents, EventLow) != 0 {
+		t.Fatalf("four partial checks should raise one data error only: %+v", st)
+	}
+	if st.PendingEvents[0].Summary["error_code"] != "partial_unresolved" {
+		t.Fatalf("partial data error must identify uncertainty: %+v", st.PendingEvents[0])
+	}
+	st = Evaluate(st, Input{Snapshot: snapshot(0.8), Channels: []string{"smtp"}}, now.Add(5*time.Minute))
+	if st.ConsecutiveFailures != 0 || st.ErrorActive || !st.LowActive || countKind(st.PendingEvents, EventLow) != 1 {
+		t.Fatalf("complete low must still trigger a low alert and clear data error: %+v", st)
+	}
+}
+
+func TestTerminalZeroSnapshotStillTriggersLow(t *testing.T) {
+	now := time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC)
+	complete := snapshot(0.8)
+	complete.TerminalErrorCounts = map[string]int{"tokenrevoked": 1}
+	st := Evaluate(State{}, Input{Snapshot: complete, Channels: []string{"smtp"}}, now)
+	if !st.LowActive || countKind(st.PendingEvents, EventLow) != 1 || st.ConsecutiveFailures != 0 {
+		t.Fatalf("confirmed terminal-zero account must not hide a complete low: %+v", st)
+	}
+}

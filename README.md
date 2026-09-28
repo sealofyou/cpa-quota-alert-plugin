@@ -6,7 +6,7 @@ This is not an OpenAI official project and not a CLIProxyAPI official project.
 
 ## Status
 
-- Version: `0.1.4`
+- Version: `0.1.5`
 - License: MIT
 - Language: Go
 - Runtime dependencies: Go standard library plus `gopkg.in/yaml.v3 v3.0.1`
@@ -29,7 +29,7 @@ The v0.1 plugin is designed to:
 - Query Codex quota through CPA networking.
 - Convert remaining quota into configurable Plus weekly equivalents.
 - Alert below `1.5`, remind every 24 hours while still low, and recover at `1.6`.
-- Treat single-account failures as partial account errors instead of whole-pool failures.
+- Treat a partial total as a lower bound: do not send a low alert from it. After three consecutive incomplete checks, send one data-error alert; a complete low snapshot still alerts immediately.
 - Avoid storing credentials, raw upstream responses, account identifiers, Management Keys, or notification secrets in state.
 
 ## Important Risks
