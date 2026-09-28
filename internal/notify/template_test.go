@@ -86,3 +86,24 @@ func TestFormatUnknownPlansIsStableAndAccountFree(t *testing.T) {
 		t.Fatalf("plans=%q", got)
 	}
 }
+
+func TestRenderDataErrorExplainsIncompleteCheck(t *testing.T) {
+	msg, err := Render(RenderInput{
+		Kind: KindDataError,
+		Summary: map[string]any{
+			"consecutive_failures": 3,
+			"error_code":           "partial_unresolved",
+		},
+		OccurredAt: time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Subject != "[CPA quota] check incomplete 3 times" {
+		t.Fatalf("subject=%q", msg.Subject)
+	}
+	if !strings.Contains(msg.Body, "no new complete weighted total was confirmed") ||
+		!strings.Contains(msg.Body, "partial_unresolved") {
+		t.Fatalf("incomplete-check message=%q", msg.Body)
+	}
+}

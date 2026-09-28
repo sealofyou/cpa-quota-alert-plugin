@@ -40,7 +40,7 @@ var defaultSubjects = map[string]string{
 	KindLow:              "[CPA quota] remaining {{total}} Plus-week equivalents",
 	KindLowReminder:      "[CPA quota] still low: {{total}} Plus-week equivalents",
 	KindRecovery:         "[CPA quota] recovered to {{total}} Plus-week equivalents",
-	KindDataError:        "[CPA quota] check failed {{consecutive_failures}} times",
+	KindDataError:        "[CPA quota] check incomplete {{consecutive_failures}} times",
 	KindPlanChanged:      "[CPA quota] unrecognized plan types",
 	KindTestNotification: "[CPA quota] test notification",
 }
@@ -79,7 +79,7 @@ Occurred at (UTC): {{occurred_at}}
 
 This message contains aggregate totals only.
 `,
-	KindDataError: `CPA quota checks failed repeatedly, so no new weighted total was computed.
+	KindDataError: `CPA quota checks failed or returned incomplete data repeatedly, so no new complete weighted total was confirmed.
 
 Consecutive failures: {{consecutive_failures}}
 Error code: {{error_code}}

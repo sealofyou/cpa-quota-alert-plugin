@@ -32,7 +32,7 @@ mail:
         Recovery threshold: {{recovery_threshold}}
         Occurred at (UTC): {{occurred_at}}
     data_error:
-      subject: "[CPA quota] check failed {{consecutive_failures}} times"
+      subject: "[CPA quota] check incomplete {{consecutive_failures}} times"
       body: |
         Consecutive failures: {{consecutive_failures}}
         Error code: {{error_code}}
