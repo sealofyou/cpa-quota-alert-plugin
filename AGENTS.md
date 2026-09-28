@@ -12,7 +12,7 @@ This repository is the public project harness for `cpa-quota-alert-plugin`, an M
 - Minimum CPA compatibility target: `v7.2.83`
 - Additional compatibility target: `v7.2.120`, `v7.2.157`
 - First release target: Linux amd64 `.so` plus SHA-256 checksum
-- Current phase: v0.1.3; public-safe mail templates and operator-configurable `mail.templates` are part of the plugin contract
+- Current phase: v0.1.4; public-safe mail templates and operator-configurable `mail.templates` are part of the plugin contract
 
 ## Scope Rules
 

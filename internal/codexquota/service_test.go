@@ -196,6 +196,34 @@ func TestHTTPHeadersRedactedErrorsAndRetryPolicy(t *testing.T) {
 	}
 }
 
+func TestHTTPErrorCategoriesPreserveFailureBoundary(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "timeout", err: context.DeadlineExceeded, want: "requesttimeout"},
+		{name: "canceled", err: context.Canceled, want: "requestcanceled"},
+		{name: "callback status", err: &abi.CallbackError{Status: 503}, want: "hostcallback503"},
+		{name: "retryable callback status", err: &abi.CallbackError{Status: 503, Retryable: true}, want: "hostcallbackretryable503"},
+		{name: "invalid envelope", err: abi.ErrInvalidEnvelope, want: "hostinvalidenvelope"},
+		{name: "invalid result", err: abi.ErrInvalidResult, want: "hostinvalidresult"},
+		{name: "unknown", err: errors.New("opaque host failure"), want: "hosthttperror"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &fakeHost{http: map[string][]fakeHTTP{"*": {{err: tc.err}}}}
+			cfg := testConfig()
+			cfg.RetryAttempts = 0
+			service := NewService(h, cfg)
+			_, code := service.fetchQuota(context.Background(), Credential{AccessToken: "token", AccountID: "account"})
+			if got := normalizeByObservation(code); got != tc.want {
+				t.Fatalf("classified error=%q normalized=%q, want %q", code, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestConcurrencyLimitAndCancellation(t *testing.T) {
 	h := &fakeHost{get: map[string]fakeGet{}, http: map[string][]fakeHTTP{}}
 	for i := 0; i < 8; i++ {
