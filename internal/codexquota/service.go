@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -207,7 +208,7 @@ func (s *Service) fetchQuota(ctx context.Context, cred Credential) ([]byte, stri
 		})
 		cancel()
 		if err != nil {
-			lastCode = "host_http_error"
+			lastCode = classifyHTTPError(err)
 			var cb *abi.CallbackError
 			if errors.As(err, &cb) && cb.Retryable && attempt+1 < attempts {
 				s.sleep(ctx, attempt)
@@ -226,6 +227,39 @@ func (s *Service) fetchQuota(ctx context.Context, cred Credential) ([]byte, stri
 		return nil, lastCode
 	}
 	return nil, lastCode
+}
+
+// classifyHTTPError keeps the failure boundary observable without retaining
+// callback messages, account identifiers, or credentials. The native CPA host
+// callback is synchronous, so a context deadline may be observed only after
+// the callback returns.
+func classifyHTTPError(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "request_timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "request_canceled"
+	}
+	var callbackErr *abi.CallbackError
+	if errors.As(err, &callbackErr) {
+		if callbackErr.Status >= 100 && callbackErr.Status <= 599 {
+			if callbackErr.Retryable {
+				return fmt.Sprintf("host_callback_retryable_%d", callbackErr.Status)
+			}
+			return fmt.Sprintf("host_callback_%d", callbackErr.Status)
+		}
+		if callbackErr.Retryable {
+			return "host_callback_retryable"
+		}
+		return "host_callback"
+	}
+	if errors.Is(err, abi.ErrInvalidEnvelope) {
+		return "host_invalid_envelope"
+	}
+	if errors.Is(err, abi.ErrInvalidResult) {
+		return "host_invalid_result"
+	}
+	return "host_http_error"
 }
 
 func (s *Service) observeError(code string) quota.AccountObservation {
