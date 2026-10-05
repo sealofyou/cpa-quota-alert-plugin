@@ -105,8 +105,7 @@ func Evaluate(current State, input Input, now time.Time) State {
 		next.LastErrorCode = ""
 		next.LastValidTotal = total
 		next.LastValidAt = now
-	}
-	if next.PlanChangedActive {
+		// Only a complete check can prove that an unknown plan is resolved.
 		next.PlanChangedActive = false
 	}
 	// A partial total is a lower bound. Below the recovery threshold it
