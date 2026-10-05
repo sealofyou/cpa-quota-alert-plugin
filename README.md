@@ -6,7 +6,7 @@ This is not an OpenAI official project and not a CLIProxyAPI official project.
 
 ## Status
 
-- Version: `0.2.0`
+- Version: `0.2.1`
 - License: MIT
 - Language: Go
 - Runtime dependencies: Go standard library plus `gopkg.in/yaml.v3 v3.0.1`
@@ -177,3 +177,9 @@ Disable the timer first, then disable the plugin configuration in CPA. If hot re
 ## Third-Party References
 
 See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for the YAML runtime dependency and protocol reference details.
+
+### Unknown plans and Pro Lite
+
+An upstream `prolite` value is distinct from `pro`. Add a separate plan rule in **Quota Alerts** only after confirming that account's quota window and weight. Do not append `prolite` to a higher-weight Pro rule or ignore it just to dismiss the warning. Plan weights remain operator policy; this release adds no universal Pro Lite default.
+
+An unknown plan pauses the aggregate quota decision. In v0.2.1, incomplete checks keep the unknown-plan alert active, even when the known subtotal exceeds the recovery threshold. Only a complete successful check clears it. This prevents repeated plan-change emails when the unknown account temporarily fails to respond, while retaining persistent data-error alerts.
