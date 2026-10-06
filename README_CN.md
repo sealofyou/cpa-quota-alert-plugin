@@ -79,7 +79,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 - 900 秒 stale 窗口
 - Webhook 默认关闭
 
-`examples/operator-confirmed-pro20.yaml` 只是 operator 本地假设示例，不是 OpenAI 官方事实。其中 K12 配置为 `5h` 窗口 `0.2x`，模糊 `pro` 配置为 `7d` 窗口 `20x`，并且不提供默认 Pro5 映射。
+`examples/plan-catalog.yaml` 只提供公开默认计划目录片段，便于复制到本地配置后按运营策略编辑。它不包含 bare `pro` 到任何高档 Pro 池的默认映射。
 
 ### SMTP 和收件人
 
@@ -162,6 +162,13 @@ YAML 运行时依赖与协议参考见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NO
 
 ### 未知套餐与 Pro Lite
 
-上游返回的 `prolite` 与 `pro` 是独立类型。确认该账号的额度窗口和权重后，在 **Quota Alerts** 中新增独立套餐规则；不要把它加入较高权重 Pro 的别名，也不要为消除告警而忽略它。倍率属于运维配置，本版本不加入通用 Pro Lite 默认倍率。
+上游返回的 `prolite` 与 `pro` 是独立类型。公开默认目录已经将 `prolite` 作为独立套餐规则；不要把它加入较高权重 Pro 的别名，也不要为消除告警而忽略它。倍率属于运维配置，可在 **Quota Alerts** 中编辑。
 
 未知套餐会暂停总配额判定。v0.2.1 在部分查询时保留未知套餐告警状态，即使已知小计超过恢复阈值，也只有完整查询成功后才解除。这样可避免未知账号偶发查询失败后重复发套餐变化邮件，同时保留连续查询失败提醒。
+### 计划目录、Pro 精确档位与 bare `pro`
+
+公开默认配置现在内置完整可编辑计划目录：`plus`、`team`、`pro100`、`pro200`、`pro500`、`prolite`。其中 Pro 100、Pro 200、Pro 500 是独立规则；`prolite` 也是独立规则，不归入 `pro`。
+
+这些 `weight` 是本插件用于监控的 Plus-week equivalents 权重，不是 OpenAI 官方换算系数。默认值可以在 CPA 侧边栏 **Quota Alerts** 配置页中编辑，也可以在 YAML 的 `plan_rules` 中调整。
+
+上游如果只返回模糊的 bare `pro`，默认不会映射到 Pro 100 / Pro 200 / Pro 500，也不会按最高档处理。它会保持 unknown / `plan_changed`，直到运维者基于明确的账号级证据添加本地映射。不要把某个账号池的私有判断提交成本仓库默认值。

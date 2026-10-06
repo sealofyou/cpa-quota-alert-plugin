@@ -352,9 +352,14 @@ func isEnvName(name string) bool {
 func parseRules(raw any, ignored PlanSet) (map[string]PlanRule, map[string]string, error) {
 	var candidates []any
 	if raw == nil {
-		candidates = []any{
-			map[string]any{"name": "plus", "aliases": []any{"plus"}, "window": Window7d, "weight": float64(1)},
-			map[string]any{"name": "team", "aliases": []any{"team"}, "window": Window7d, "weight": float64(1)},
+		defaults := DefaultPlanRules()
+		candidates = make([]any, 0, len(defaults))
+		for _, rule := range defaults {
+			aliases := make([]any, 0, len(rule.Aliases))
+			for _, alias := range rule.Aliases {
+				aliases = append(aliases, alias)
+			}
+			candidates = append(candidates, map[string]any{"name": rule.Name, "aliases": aliases, "window": rule.Window, "weight": rule.Weight})
 		}
 	} else {
 		var ok bool
@@ -432,6 +437,20 @@ func parseRules(raw any, ignored PlanSet) (map[string]PlanRule, map[string]strin
 		rules[name] = rule
 	}
 	return rules, aliases, nil
+}
+
+// DefaultPlanRules is the public starter catalog exposed to fresh clones and the
+// CPA settings page. Weights are operator policy in Plus-week equivalents, not
+// official OpenAI conversion factors. Bare "pro" is intentionally absent.
+func DefaultPlanRules() []PlanRule {
+	return []PlanRule{
+		{Name: "plus", Aliases: []string{"plus", "chatgptplus"}, Window: Window7d, Weight: 1},
+		{Name: "team", Aliases: []string{"team", "chatgptteam"}, Window: Window7d, Weight: 1},
+		{Name: "pro100", Aliases: []string{"pro100", "chatgptpro100"}, Window: Window7d, Weight: 100},
+		{Name: "pro200", Aliases: []string{"pro200", "chatgptpro200"}, Window: Window7d, Weight: 200},
+		{Name: "pro500", Aliases: []string{"pro500", "chatgptpro500"}, Window: Window7d, Weight: 500},
+		{Name: "prolite", Aliases: []string{"prolite", "chatgptprolite"}, Window: Window7d, Weight: 1},
+	}
 }
 
 func NormalizePlan(value string) string {

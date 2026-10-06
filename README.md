@@ -37,7 +37,7 @@ The v0.1 plugin is designed to:
 - Native plugins run inside the CPA process and have high privilege. A plugin panic or memory-safety issue can affect CPA process stability.
 - Only install trusted source builds or release assets whose SHA-256 checksum you verified.
 - The ChatGPT `wham/usage` backend route is an internal API surface and can change without notice.
-- Plan weights are operator configuration, not official product facts.
+- Plan weights are operator configuration, not official product facts. The shipped catalog is a conservative starter for monitoring and remains editable.
 - This repository must not contain real credentials, real host addresses, real recipient addresses, account identifiers, Management Keys, or production configuration.
 
 ## Repository Layout
@@ -88,7 +88,10 @@ The page validates the complete candidate configuration before saving and reads 
 Use `examples/plugin-config.yaml` as the public conservative baseline:
 
 - `dry_run: true` by default. Set `dry_run: false` only after the notification values and a test notification work.
-- Plus and Team only, both `1x` over `7d`
+- Plus and Team, both `1x` over `7d`
+- Exact Pro tiers: `pro100`, `pro200`, and `pro500`, represented as separate editable `7d` rules
+- Upstream `prolite`, represented as a separate editable `7d` rule
+- Ambiguous bare `pro` is not a default alias. It remains `plan_changed` unless an operator adds an explicit account-specific mapping.
 - Free plans ignored
 - Terminal codes: `token_invalidated`, `token_revoked`, `deactivated_workspace`
 - Low/recovery thresholds: `1.5` and `1.6`
@@ -98,7 +101,7 @@ Use `examples/plugin-config.yaml` as the public conservative baseline:
 - Stale status window: 900 seconds
 - Webhook disabled by default
 
-Use `examples/operator-confirmed-pro20.yaml` only as a local-operator assumption sample. It is not an OpenAI official fact. In that file, K12 is configured as `0.2x` over `5h`, ambiguous `pro` is configured as `20x` over `7d`, and no default Pro5 mapping is defined.
+Use `examples/plan-catalog.yaml` when you only need the editable plan-rule block. Its weights are package defaults for monitoring in Plus-week equivalents, not OpenAI official conversion factors. The exact Pro tier entries are independent, and `prolite` is independent from `pro`. If your upstream returns only bare `pro`, leave it unknown until you have an explicit account-specific mapping; do not silently treat it as Pro 100, Pro 200, Pro 500, or any old Pro20-style pool.
 
 ### SMTP and recipients
 
@@ -178,8 +181,23 @@ Disable the timer first, then disable the plugin configuration in CPA. If hot re
 
 See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for the YAML runtime dependency and protocol reference details.
 
-### Unknown plans and Pro Lite
+### Plan catalog, unknown plans, and Pro Lite
 
-An upstream `prolite` value is distinct from `pro`. Add a separate plan rule in **Quota Alerts** only after confirming that account's quota window and weight. Do not append `prolite` to a higher-weight Pro rule or ignore it just to dismiss the warning. Plan weights remain operator policy; this release adds no universal Pro Lite default.
+The public default plan catalog is:
+
+| Canonical rule | Default aliases | Window | Default weight |
+| --- | --- | --- | --- |
+| `plus` | `plus`, `chatgptplus` | `7d` | `1` |
+| `team` | `team`, `chatgptteam` | `7d` | `1` |
+| `pro100` | `pro100`, `chatgptpro100` | `7d` | `100` |
+| `pro200` | `pro200`, `chatgptpro200` | `7d` | `200` |
+| `pro500` | `pro500`, `chatgptpro500` | `7d` | `500` |
+| `prolite` | `prolite`, `chatgptprolite` | `7d` | `1` |
+
+OpenAI's current published Pro names are Pro 100, Pro 200, and Pro 500. This plugin represents those exact tiers independently. The numeric weights above are editable monitoring weights in this plugin's Plus-week-equivalent metric; they are not official conversion factors.
+
+An upstream `prolite` value is distinct from `pro`, and the shipped catalog keeps it separate. Do not append `prolite` to a higher-weight Pro rule or ignore it just to dismiss a warning. Plan weights remain operator policy.
+
+An upstream bare `pro` value is intentionally ambiguous. It is not a default alias for any exact Pro tier, and it is not treated as the highest tier. If a site can prove a specific account maps bare `pro` to a specific pool, add that mapping locally for that operator/account; do not commit that private assumption as a package default.
 
 An unknown plan pauses the aggregate quota decision. In v0.2.1, incomplete checks keep the unknown-plan alert active, even when the known subtotal exceeds the recovery threshold. Only a complete successful check clears it. This prevents repeated plan-change emails when the unknown account temporarily fails to respond, while retaining persistent data-error alerts.

@@ -1,0 +1,44 @@
+# Public starter catalog for CPA quota alert plan rules.
+#
+# These weights are operator-configurable monitoring weights in Plus-week
+# equivalents. They are not OpenAI official conversion factors. Keep exact Pro
+# tiers and Pro Lite separate, and do not alias ambiguous bare "pro" unless the
+# operator has an explicit account-specific mapping outside this public default.
+
+plan_rules:
+  - name: plus
+    aliases:
+      - plus
+      - chatgptplus
+    window: 7d
+    weight: 1
+  - name: team
+    aliases:
+      - team
+      - chatgptteam
+    window: 7d
+    weight: 1
+  - name: pro100
+    aliases:
+      - pro100
+      - chatgptpro100
+    window: 7d
+    weight: 100
+  - name: pro200
+    aliases:
+      - pro200
+      - chatgptpro200
+    window: 7d
+    weight: 200
+  - name: pro500
+    aliases:
+      - pro500
+      - chatgptpro500
+    window: 7d
+    weight: 500
+  - name: prolite
+    aliases:
+      - prolite
+      - chatgptprolite
+    window: 7d
+    weight: 1

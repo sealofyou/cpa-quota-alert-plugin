@@ -11,10 +11,13 @@ import (
 func testRules() Rules {
 	return Rules{
 		PlanRules: map[string]PlanRule{
-			"plus": {Name: "plus", Aliases: []string{"plus", "chat gpt-plus"}, Window: Window7d, Weight: 1},
-			"team": {Name: "team", Aliases: []string{"team"}, Window: Window7d, Weight: 1},
-			"k12":  {Name: "k12", Aliases: []string{"k-12"}, Window: Window7d, Weight: 0.2},
-			"pro":  {Name: "pro", Aliases: []string{"pro20"}, Window: Window7d, Weight: 20},
+			"plus":    {Name: "plus", Aliases: []string{"plus", "chat gpt-plus"}, Window: Window7d, Weight: 1},
+			"team":    {Name: "team", Aliases: []string{"team"}, Window: Window7d, Weight: 1},
+			"k12":     {Name: "k12", Aliases: []string{"k-12"}, Window: Window7d, Weight: 0.2},
+			"pro100":  {Name: "pro100", Aliases: []string{"pro100"}, Window: Window7d, Weight: 100},
+			"pro200":  {Name: "pro200", Aliases: []string{"pro200"}, Window: Window7d, Weight: 200},
+			"pro500":  {Name: "pro500", Aliases: []string{"pro500"}, Window: Window7d, Weight: 500},
+			"prolite": {Name: "prolite", Aliases: []string{"prolite"}, Window: Window7d, Weight: 1},
 		},
 		IgnoredPlans:       []string{"free"},
 		TerminalErrorCodes: []string{"401", "403"},

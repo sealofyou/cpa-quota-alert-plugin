@@ -29,12 +29,12 @@ terminal_error_codes: [token_revoked]
 	}
 }
 
-func TestParseYAMLOperatorConfirmedPro20Example(t *testing.T) {
+func TestParseYAMLPluginConfigExample(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("locate yaml_test.go")
 	}
-	data, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "examples", "operator-confirmed-pro20.yaml"))
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "examples", "plugin-config.yaml"))
 	if err != nil {
 		t.Fatalf("read example: %v", err)
 	}
@@ -66,16 +66,35 @@ func TestParseYAMLOperatorConfirmedPro20Example(t *testing.T) {
 			t.Fatalf("expected environment query %q was not used", name)
 		}
 	}
-	k12 := cfg.PlanRules["k12"]
-	if k12.Window != Window5h || k12.Weight != 0.2 {
-		t.Fatalf("k12 rule = %+v, want window %q weight 0.2", k12, Window5h)
+	for name, weight := range map[string]float64{"pro100": 100, "pro200": 200, "pro500": 500, "prolite": 1} {
+		rule := cfg.PlanRules[name]
+		if rule.Window != Window7d || rule.Weight != weight {
+			t.Fatalf("%s rule = %+v, want window %q weight %.1f", name, rule, Window7d, weight)
+		}
 	}
-	if got := cfg.Aliases["pro"]; got != "pro20" {
-		t.Fatalf("alias pro = %q, want pro20", got)
+	if _, ok := cfg.Aliases["pro"]; ok {
+		t.Fatalf("plugin example must not alias ambiguous bare pro")
 	}
-	pro20 := cfg.PlanRules["pro20"]
-	if pro20.Window != Window7d || pro20.Weight != 20 {
-		t.Fatalf("pro20 rule = %+v, want window %q weight 20", pro20, Window7d)
+}
+
+func TestParseYAMLPlanCatalogExample(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate yaml_test.go")
+	}
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "examples", "plan-catalog.yaml"))
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	cfg, err := ParseYAML(data, func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("ParseYAML: %v", err)
+	}
+	if len(cfg.PlanRules) != len(DefaultPlanRules()) {
+		t.Fatalf("plan catalog rule count = %d, want %d", len(cfg.PlanRules), len(DefaultPlanRules()))
+	}
+	if _, ok := cfg.Aliases["pro"]; ok {
+		t.Fatalf("catalog example must not alias ambiguous bare pro")
 	}
 }
 
@@ -85,7 +104,7 @@ func TestParseYAMLEmptyUsesDefaults(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ParseYAML(%q): %v", data, err)
 		}
-		if cfg.Concurrency != 4 || cfg.LowThreshold != 1.5 || len(cfg.PlanRules) != 2 {
+		if cfg.Concurrency != 4 || cfg.LowThreshold != 1.5 || len(cfg.PlanRules) != len(DefaultPlanRules()) {
 			t.Fatalf("defaults not applied: %+v", cfg)
 		}
 	}

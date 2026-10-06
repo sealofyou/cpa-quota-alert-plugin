@@ -33,6 +33,33 @@ plan_rules:
       - chatgptteam
     window: 7d
     weight: 1
+  # Exact Pro tiers are independent. Do not add ambiguous bare "pro" here.
+  # Weights are operator-configurable monitoring policy, not OpenAI official
+  # conversion factors.
+  - name: pro100
+    aliases:
+      - pro100
+      - chatgptpro100
+    window: 7d
+    weight: 100
+  - name: pro200
+    aliases:
+      - pro200
+      - chatgptpro200
+    window: 7d
+    weight: 200
+  - name: pro500
+    aliases:
+      - pro500
+      - chatgptpro500
+    window: 7d
+    weight: 500
+  - name: prolite
+    aliases:
+      - prolite
+      - chatgptprolite
+    window: 7d
+    weight: 1
 
 smtp:
   enabled: true

@@ -17,8 +17,17 @@ func TestDefaultsAndValidation(t *testing.T) {
 	if cfg.PlanRules["plus"].Weight != 1 || cfg.PlanRules["plus"].Window != Window7d {
 		t.Fatalf("missing conservative plus default: %+v", cfg.PlanRules)
 	}
+	for name, weight := range map[string]float64{"pro100": 100, "pro200": 200, "pro500": 500, "prolite": 1} {
+		rule, ok := cfg.PlanRules[name]
+		if !ok || rule.Window != Window7d || rule.Weight != weight {
+			t.Fatalf("default %s rule = %+v, want 7d weight %.1f", name, rule, weight)
+		}
+	}
 	if _, ok := cfg.PlanRules["pro"]; ok {
 		t.Fatalf("pro must not be a default plan rule")
+	}
+	if _, ok := cfg.Aliases["pro"]; ok {
+		t.Fatalf("bare pro must not be a default alias")
 	}
 	if !cfg.IgnoredPlans.Contains("free") {
 		t.Fatalf("free must be ignored by default")
@@ -47,16 +56,16 @@ func TestExplicitRulesAliasesConflictsAndSecrets(t *testing.T) {
 	}
 }
 
-func TestExplicitK12AndProAllowedOnlyWhenConfigured(t *testing.T) {
+func TestExplicitK12AndBareProAllowedOnlyWhenConfigured(t *testing.T) {
 	cfg, err := Parse(map[string]any{"plan_rules": []any{
 		map[string]any{"name": "plus", "aliases": []any{"plus"}, "window": Window7d, "weight": 1},
 		map[string]any{"name": "k12", "aliases": []any{"k-12"}, "window": Window7d, "weight": 0.2},
-		map[string]any{"name": "pro", "aliases": []any{"pro20"}, "window": Window7d, "weight": 20},
+		map[string]any{"name": "localpro100", "aliases": []any{"pro"}, "window": Window7d, "weight": 100},
 	}}, nil)
 	if err != nil {
 		t.Fatalf("Parse explicit rules: %v", err)
 	}
-	if cfg.PlanRules["k12"].Weight != 0.2 || cfg.PlanRules["pro"].Weight != 20 {
+	if cfg.PlanRules["k12"].Weight != 0.2 || cfg.PlanRules["localpro100"].Weight != 100 || cfg.Aliases["pro"] != "localpro100" {
 		t.Fatalf("explicit weights not preserved: %+v", cfg.PlanRules)
 	}
 }
@@ -73,13 +82,16 @@ func TestThresholdAndURLValidation(t *testing.T) {
 	}
 }
 
-func TestDefaultsExcludeProAndK12(t *testing.T) {
+func TestDefaultsExcludeBareProAndK12(t *testing.T) {
 	cfg, err := Parse(map[string]any{}, nil)
 	if err != nil {
 		t.Fatalf("Parse defaults: %v", err)
 	}
 	if _, ok := cfg.PlanRules["pro"]; ok {
-		t.Fatalf("pro must not be a default plan rule")
+		t.Fatalf("bare pro must not be a default plan rule")
+	}
+	if _, ok := cfg.Aliases["pro"]; ok {
+		t.Fatalf("bare pro must not be a default alias")
 	}
 	if _, ok := cfg.PlanRules["k12"]; ok {
 		t.Fatalf("k12 must not be a default plan rule")

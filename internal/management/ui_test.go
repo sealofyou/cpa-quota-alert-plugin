@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sealofyou/cpa-quota-alert-plugin/internal/config"
 	"github.com/sealofyou/cpa-quota-alert-plugin/internal/secrets"
 )
 
@@ -27,6 +28,46 @@ func TestUIResourceAndEffectiveSettingsNeverContainNotificationValues(t *testing
 	var settings map[string]any
 	if err := json.Unmarshal(effective.Body, &settings); err != nil || settings["low_threshold"] != 1.5 {
 		t.Fatalf("effective settings: %v %v", settings, err)
+	}
+}
+
+func TestEffectiveSettingsExposeEditableDefaultPlanCatalog(t *testing.T) {
+	h := newTestHandler(t)
+	cfg, err := config.Parse(map[string]any{}, nil)
+	if err != nil {
+		t.Fatalf("Parse defaults: %v", err)
+	}
+	h.deps.ConfigProvider = configProviderFunc(func(context.Context) (config.Config, bool) { return cfg, true })
+	effective := decodeResponse(t, mustCall(t, h, "GET", "/cpa-quota-alert/effective-config", nil))
+	if effective.StatusCode != 200 {
+		t.Fatalf("effective status=%d body=%s", effective.StatusCode, effective.Body)
+	}
+	var settings struct {
+		PlanRules []struct {
+			Name    string   `json:"name"`
+			Aliases []string `json:"aliases"`
+			Window  string   `json:"window"`
+			Weight  float64  `json:"weight"`
+		} `json:"plan_rules"`
+	}
+	if err := json.Unmarshal(effective.Body, &settings); err != nil {
+		t.Fatalf("decode effective settings: %v", err)
+	}
+	got := map[string]float64{}
+	aliases := map[string]bool{}
+	for _, rule := range settings.PlanRules {
+		got[rule.Name] = rule.Weight
+		for _, alias := range rule.Aliases {
+			aliases[alias] = true
+		}
+	}
+	for name, weight := range map[string]float64{"plus": 1, "team": 1, "pro100": 100, "pro200": 200, "pro500": 500, "prolite": 1} {
+		if got[name] != weight {
+			t.Fatalf("effective plan %s weight = %v, want %v; all=%+v", name, got[name], weight, settings.PlanRules)
+		}
+	}
+	if aliases["pro"] {
+		t.Fatalf("effective default catalog must not alias bare pro: %+v", settings.PlanRules)
 	}
 }
 
