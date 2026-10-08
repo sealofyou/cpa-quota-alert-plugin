@@ -24,3 +24,25 @@ Let an operator configure quota alerts from the CPA Management sidebar without e
 ## Operational boundary
 
 The page does not edit the systemd timer, CPA Management Key, Codex auth files, or unrelated plugins. A saved notification value can affect the running notification sender immediately. Production rollout requires a backup of the plugin binary, CPA config, state, service unit, and private notification values when present.
+
+## v0.3.0 per-tier plan weights
+
+- Problem: plan weights were correct per account in code, but the shipped sample and the
+  deployed rule set folded the ambiguous upstream value `pro` into a single `pro20` rule.
+  Nothing stopped an operator from adding a second upstream tier, such as `prolite`, to that
+  same rule as an alias, which would have weighed a Pro 100 account at the Pro 200 multiplier.
+- Change: `internal/config` now knows which plan types the upstream account surface reports as
+  distinct values and rejects any plan rule that claims more than one of them, naming the
+  conflicting tiers. Operator-local spellings such as `chatgptplus` or `pro20` are not upstream
+  values and stay usable as aliases. No default multiplier is added for any tier.
+- Sample: `examples/operator-confirmed-pro20.yaml` is renamed to
+  `examples/operator-confirmed-plan-tiers.yaml` and gives `prolite` and `pro` separate rules and
+  separate weights. `promax` and every other unconfirmed tier stay unmapped so that an account on
+  one of them stops the weighted total and raises a plan-change alert.
+- Regression tests: a rule claiming two upstream tiers is rejected (and is accepted again when the
+  guard is removed, which is how the guard was shown to be load-bearing); a mixed
+  plus/prolite/pro pool weighs each account by its own tier; swapping the two Pro tiers changes
+  the total; an unconfigured tier still stops the total; a failed account keeps the snapshot
+  partial without hiding the unknown tier; a terminal credential still counts as zero capacity.
+- Plan multipliers remain operator policy. Nothing in this repository asserts an OpenAI
+  entitlement ratio for any tier.

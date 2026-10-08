@@ -98,7 +98,7 @@ Use `examples/plugin-config.yaml` as the public conservative baseline:
 - Stale status window: 900 seconds
 - Webhook disabled by default
 
-Use `examples/operator-confirmed-pro20.yaml` only as a local-operator assumption sample. It is not an OpenAI official fact. In that file, K12 is configured as `0.2x` over `5h`, ambiguous `pro` is configured as `20x` over `7d`, and no default Pro5 mapping is defined.
+Use `examples/operator-confirmed-plan-tiers.yaml` only as a local-operator assumption sample. It is not an OpenAI official fact. Every upstream subscription tier gets its own rule and its own weight there: K12 is `0.2x` over `5h`, `prolite` is `5x` over `7d`, and `pro` is `20x` over `7d`. Tiers the operator has not confirmed, `promax` among them, are deliberately absent so an account on one of them stops the weighted total instead of borrowing a neighbouring weight.
 
 ### SMTP and recipients
 
@@ -180,6 +180,6 @@ See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for the YAML runtime depe
 
 ### Unknown plans and Pro Lite
 
-An upstream `prolite` value is distinct from `pro`. Add a separate plan rule in **Quota Alerts** only after confirming that account's quota window and weight. Do not append `prolite` to a higher-weight Pro rule or ignore it just to dismiss the warning. Plan weights remain operator policy; this release adds no universal Pro Lite default.
+The upstream account surface reports each subscription tier as its own `plan_type` value, so `prolite`, `pro` and `promax` are three distinct tiers. Give each tier you run its own plan rule with its own confirmed weight in **Quota Alerts**. Since v0.3.0 the config is rejected at load time when a single rule claims two upstream plan types, because that would weigh one tier's accounts at another tier's multiplier. Do not ignore a tier just to dismiss the warning either. Plan weights remain operator policy; this project ships no default multiplier for any Pro tier.
 
-An unknown plan pauses the aggregate quota decision. In v0.2.1, incomplete checks keep the unknown-plan alert active, even when the known subtotal exceeds the recovery threshold. Only a complete successful check clears it. This prevents repeated plan-change emails when the unknown account temporarily fails to respond, while retaining persistent data-error alerts.
+An unknown plan pauses the aggregate quota decision. Since v0.2.1, incomplete checks keep the unknown-plan alert active, even when the known subtotal exceeds the recovery threshold. Only a complete successful check clears it. This prevents repeated plan-change emails when the unknown account temporarily fails to respond, while retaining persistent data-error alerts.

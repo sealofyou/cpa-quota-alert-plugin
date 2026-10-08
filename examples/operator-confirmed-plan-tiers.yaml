@@ -1,7 +1,15 @@
 # Operator local assumption example, not OpenAI official fact.
 # Use only after the operator has independently confirmed these pool weights.
-# Ambiguous "pro" maps to Pro20x here. There is no default Pro5 mapping; add a
-# precise alias such as "pro5" in a separate local config if that pool exists.
+#
+# The upstream account surface reports each subscription tier as its own plan_type
+# value, so every tier gets its own rule and its own weight here. One rule must never
+# collect two upstream plan types: that would apply one tier's multiplier to another
+# tier's accounts, and the plugin rejects such a config at load time.
+#
+# "prolite" and "pro" are separate upstream values and carry separate weights below.
+# "promax" and every other upstream tier are deliberately absent: an account on an
+# unconfigured tier stops the weighted total and raises a plan-change alert instead
+# of being folded into a neighbouring weight.
 
 dry_run: true
 concurrency: 4
@@ -44,11 +52,15 @@ plan_rules:
       - chatgptk12
     window: 5h
     weight: 0.2
-  - name: pro20
+  - name: prolite
+    aliases:
+      - prolite
+    window: 7d
+    weight: 5
+  - name: pro
     aliases:
       - pro
-      - pro20
-      - chatgptpro20
+      - chatgptpro
     window: 7d
     weight: 20
 

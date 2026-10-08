@@ -420,6 +420,12 @@ func parseRules(raw any, ignored PlanSet) (map[string]PlanRule, map[string]strin
 		if _, exists := rules[name]; exists {
 			return nil, nil, fmt.Errorf("duplicate plan rule %q", name)
 		}
+		if claimed := claimedUpstreamPlans(rule); len(claimed) > 1 {
+			return nil, nil, fmt.Errorf(
+				"plan rule %q claims %d distinct upstream plan types (%s); each upstream plan type is a separate subscription tier and needs its own rule with its own confirmed weight",
+				name, len(claimed), strings.Join(claimed, ", "),
+			)
+		}
 		for _, alias := range rule.Aliases {
 			if ignored.Contains(alias) {
 				return nil, nil, fmt.Errorf("plan alias %q conflicts with ignored_plans", alias)
@@ -438,6 +444,53 @@ func NormalizePlan(value string) string {
 	lower := strings.ToLower(strings.TrimSpace(value))
 	replacer := strings.NewReplacer(" ", "", "_", "", "-", "")
 	return replacer.Replace(lower)
+}
+
+// knownUpstreamPlans lists the normalized ChatGPT subscription plan types that the
+// upstream account surface reports as separate values. Each one is a distinct SKU with
+// its own entitlement, so two of them must never share a single plan rule: that would
+// apply one account's multiplier to another account's tier. The list exists to reject
+// such configuration, not to supply any default weight; weights stay operator policy.
+var knownUpstreamPlans = []string{
+	"free",
+	"go",
+	"plus",
+	"pro",
+	"prolite",
+	"promax",
+	"team",
+	"selfservebusinessprolite",
+	"selfservebusinessusagebased",
+	"business",
+	"ent26",
+	"enterprisecbpautomation",
+	"enterprisecbpusagebased",
+	"enterprise",
+	"edu",
+	"eduplus",
+	"edupro",
+	"k12",
+}
+
+// IsKnownUpstreamPlan reports whether value normalizes to a plan type the upstream
+// account surface is known to report as its own distinct value.
+func IsKnownUpstreamPlan(value string) bool {
+	return slices.Contains(knownUpstreamPlans, NormalizePlan(value))
+}
+
+// claimedUpstreamPlans returns the sorted, deduplicated known upstream plan types that a
+// single rule would absorb through its canonical name and aliases. Operator-local spellings
+// such as "chatgptplus" or "pro20" are not upstream values and never count here.
+func claimedUpstreamPlans(rule PlanRule) []string {
+	claimed := make([]string, 0, len(rule.Aliases)+1)
+	for _, candidate := range append([]string{rule.Name}, rule.Aliases...) {
+		normalized := NormalizePlan(candidate)
+		if IsKnownUpstreamPlan(normalized) && !slices.Contains(claimed, normalized) {
+			claimed = append(claimed, normalized)
+		}
+	}
+	slices.Sort(claimed)
+	return claimed
 }
 
 func NormalizeHost(value string) string {
