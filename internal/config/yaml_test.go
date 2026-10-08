@@ -29,12 +29,12 @@ terminal_error_codes: [token_revoked]
 	}
 }
 
-func TestParseYAMLOperatorConfirmedPro20Example(t *testing.T) {
+func TestParseYAMLOperatorConfirmedPlanTiersExample(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("locate yaml_test.go")
 	}
-	data, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "examples", "operator-confirmed-pro20.yaml"))
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "examples", "operator-confirmed-plan-tiers.yaml"))
 	if err != nil {
 		t.Fatalf("read example: %v", err)
 	}
@@ -70,12 +70,25 @@ func TestParseYAMLOperatorConfirmedPro20Example(t *testing.T) {
 	if k12.Window != Window5h || k12.Weight != 0.2 {
 		t.Fatalf("k12 rule = %+v, want window %q weight 0.2", k12, Window5h)
 	}
-	if got := cfg.Aliases["pro"]; got != "pro20" {
-		t.Fatalf("alias pro = %q, want pro20", got)
+	if got := cfg.Aliases["pro"]; got != "pro" {
+		t.Fatalf("alias pro = %q, want pro", got)
 	}
-	pro20 := cfg.PlanRules["pro20"]
-	if pro20.Window != Window7d || pro20.Weight != 20 {
-		t.Fatalf("pro20 rule = %+v, want window %q weight 20", pro20, Window7d)
+	pro := cfg.PlanRules["pro"]
+	if pro.Window != Window7d || pro.Weight != 20 {
+		t.Fatalf("pro rule = %+v, want window %q weight 20", pro, Window7d)
+	}
+	// Each upstream tier keeps its own weight; prolite must not inherit the pro weight.
+	proLite := cfg.PlanRules["prolite"]
+	if proLite.Window != Window7d || proLite.Weight != 5 {
+		t.Fatalf("prolite rule = %+v, want window %q weight 5", proLite, Window7d)
+	}
+	if got := cfg.Aliases["prolite"]; got != "prolite" {
+		t.Fatalf("alias prolite = %q, want prolite", got)
+	}
+	// An unconfigured upstream tier must stay unmapped so it stops the total instead of
+	// borrowing a neighbouring weight.
+	if canonical, ok := cfg.Aliases["promax"]; ok {
+		t.Fatalf("promax must not be mapped, got %q", canonical)
 	}
 }
 
