@@ -46,3 +46,21 @@ The page does not edit the systemd timer, CPA Management Key, Codex auth files, 
   partial without hiding the unknown tier; a terminal credential still counts as zero capacity.
 - Plan multipliers remain operator policy. Nothing in this repository asserts an OpenAI
   entitlement ratio for any tier.
+
+## v0.3.1 CPA v8.0.76 lifecycle compatibility
+
+- Problem: after a host upgrade to official CPA v8.0.76, `plugin.register` failed with
+  `invalid_config`. That host sends `schema_version` 10 (v8.0.10 sent 6) and adds the
+  `multi_auth_providers` field to the lifecycle request. The plugin decoded lifecycle requests
+  with unknown fields disallowed and rejected any host schema above 6.
+- Change: the lifecycle decoder now ignores unknown fields and accepts any host schema version.
+  Only `config_yaml` is read. Host schema bumps describe host features (stream, interceptor and
+  auth encodings) that this management-only plugin never consumes, and the host negotiates down
+  to the plugin's answered schema (still 1). Malformed JSON and trailing data are still rejected,
+  and a rejected reconfigure still keeps the previous config. This matches the official example
+  plugins, which do not validate the lifecycle request shape.
+- Regression tests: schemas 1-10 and 15 register; the exact v8.0.76 payload shape
+  (`schema_version` 10 with `multi_auth_providers`) and a future payload with an extra nested
+  field both register and apply `config_yaml`; a newer-schema reconfigure applies; a malformed
+  reconfigure is rejected and leaves the previous config in place. Both new assertions fail on
+  v0.3.0.

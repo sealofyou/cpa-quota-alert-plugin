@@ -19,13 +19,20 @@ const (
 	MethodPluginShutdown    = "plugin.shutdown"
 
 	SchemaVersion = 1
-	PluginVersion = "0.3.0"
+	PluginVersion = "0.3.1"
 
 	// HostSchemaVersionCPA72157 is the RPC schema that official CPA v7.2.157
-	// sends on plugin.register. The register payload shape is still
-	// config_yaml + schema_version; versions 3-6 only change later stream
-	// and management encoding, which this plugin does not consume at register.
+	// sends on plugin.register.
 	HostSchemaVersionCPA72157 = 6
+
+	// HostSchemaVersionCPA8076 is the RPC schema that official CPA v8.0.76
+	// sends on plugin.register, together with the additive
+	// multi_auth_providers flag. Host schema bumps describe host features
+	// (stream, interceptor and auth encodings) that this management-only
+	// plugin never consumes, and the host negotiates down to the schema the
+	// plugin answers with. The lifecycle decoder therefore accepts any host
+	// schema and ignores unknown fields; only config_yaml is read.
+	HostSchemaVersionCPA8076 = 10
 
 	maxLifecycleRequestBytes = config.MaxYAMLBytes*2 + 4096
 )
@@ -275,7 +282,6 @@ func decodeLifecycleRequest(raw []byte) (lifecycleRequest, error) {
 		return lifecycleRequest{}, nil
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
 	var req lifecycleRequest
 	if err := decoder.Decode(&req); err != nil {
 		return lifecycleRequest{}, errors.New("invalid lifecycle request")
@@ -283,9 +289,6 @@ func decodeLifecycleRequest(raw []byte) (lifecycleRequest, error) {
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return lifecycleRequest{}, errors.New("invalid lifecycle request")
-	}
-	if req.SchemaVersion > HostSchemaVersionCPA72157 {
-		return lifecycleRequest{}, errors.New("unsupported lifecycle request schema")
 	}
 	return req, nil
 }

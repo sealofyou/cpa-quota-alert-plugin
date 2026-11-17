@@ -188,7 +188,6 @@ func TestUnknownInvalidAndPanicAreStable(t *testing.T) {
 func TestLifecycleRequestIsStrict(t *testing.T) {
 	app := New(func(string) string { return "" })
 	for _, raw := range [][]byte{
-		[]byte(`{"config_yaml":"","extra":true}`),
 		[]byte(`{"config_yaml":`),
 		[]byte(`{"config_yaml":""}{}`),
 	} {
@@ -201,7 +200,7 @@ func TestLifecycleRequestIsStrict(t *testing.T) {
 
 func TestLifecycleSchemaVersionsAndUnsupportedReconfigure(t *testing.T) {
 	app := New(func(string) string { return "" })
-	for _, schema := range []uint32{1, 2, 3, 4, 5, 6} {
+	for _, schema := range []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, HostSchemaVersionCPA8076, HostSchemaVersionCPA8076 + 5} {
 		response, code := app.Call(MethodPluginRegister, lifecycleJSONSchema(t, schema, "concurrency: 2\n"))
 		env := decodeEnvelope(t, response)
 		if code != 0 || !env.OK {
@@ -218,13 +217,45 @@ func TestLifecycleSchemaVersionsAndUnsupportedReconfigure(t *testing.T) {
 	if _, code := app.Call(MethodPluginRegister, lifecycleJSONSchema(t, 0, "concurrency: 4\n")); code != 0 {
 		t.Fatal("schema 0 compatibility register failed")
 	}
-	raw, code := app.Call(MethodPluginReconfigure, lifecycleJSONSchema(t, HostSchemaVersionCPA72157+1, "concurrency: 9\n"))
-	if code == 0 || decodeEnvelope(t, raw).Error.Code != "invalid_config" {
-		t.Fatalf("unsupported schema accepted: code=%d raw=%s", code, raw)
+	raw, code := app.Call(MethodPluginReconfigure, lifecycleJSONSchema(t, HostSchemaVersionCPA8076+1, "concurrency: 9\n"))
+	if code != 0 || !decodeEnvelope(t, raw).OK {
+		t.Fatalf("newer host schema reconfigure rejected: code=%d raw=%s", code, raw)
 	}
 	cfg, ok := app.Current()
-	if !ok || cfg.Concurrency != 4 {
-		t.Fatalf("unsupported schema replaced previous config: ok=%t cfg=%+v", ok, cfg)
+	if !ok || cfg.Concurrency != 9 {
+		t.Fatalf("newer host schema did not apply config: ok=%t cfg=%+v", ok, cfg)
+	}
+	raw, code = app.Call(MethodPluginReconfigure, []byte(`{"config_yaml":`))
+	if code == 0 || decodeEnvelope(t, raw).Error.Code != "invalid_config" {
+		t.Fatalf("malformed reconfigure accepted: code=%d raw=%s", code, raw)
+	}
+	if cfg, ok := app.Current(); !ok || cfg.Concurrency != 9 {
+		t.Fatalf("malformed reconfigure replaced previous config: ok=%t cfg=%+v", ok, cfg)
+	}
+}
+
+// TestLifecycleRequestFromCPA8076 replays the plugin.register payload shape
+// that official CPA v8.0.76 sends: schema_version 10 plus the additive
+// multi_auth_providers flag. v0.3.0 rejected it as invalid_config.
+func TestLifecycleRequestFromCPA8076(t *testing.T) {
+	app := New(func(string) string { return "" })
+	yaml, err := json.Marshal([]byte("concurrency: 3\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range [][]byte{
+		[]byte(`{"config_yaml":` + string(yaml) + `,"schema_version":10,"multi_auth_providers":true}`),
+		[]byte(`{"config_yaml":` + string(yaml) + `,"schema_version":11,"multi_auth_providers":true,"future_host_flag":{"nested":[1,2]}}`),
+	} {
+		response, code := app.Call(MethodPluginRegister, raw)
+		env := decodeEnvelope(t, response)
+		if code != 0 || !env.OK {
+			t.Fatalf("CPA v8 register rejected: raw=%s code=%d response=%s", raw, code, response)
+		}
+		cfg, ok := app.Current()
+		if !ok || cfg.Concurrency != 3 {
+			t.Fatalf("CPA v8 register did not apply config: ok=%t cfg=%+v", ok, cfg)
+		}
 	}
 }
 
