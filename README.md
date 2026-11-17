@@ -11,7 +11,7 @@ This is not an OpenAI official project and not a CLIProxyAPI official project.
 - Language: Go
 - Runtime dependencies: Go standard library plus `gopkg.in/yaml.v3 v3.0.1`
 - Plugin target: CLIProxyAPI C ABI v1
-- Compatibility: `v7.2.83`, `v7.2.120`, `v7.2.157`
+- Compatibility: `v7.2.83`, `v7.2.120`, `v7.2.157`, `v8.0.76`
 - Release asset: Linux amd64 `.so` with SHA-256 checksum on GitHub Releases
 
 The plugin registers with CPA, checks Codex quota, and can send SMTP or webhook notifications. Mail bodies are public-safe templates with aggregate totals only. Recipients and notification secrets stay in a private host file or a root-only env file, never in this repository. Verify the `.so` checksum from the GitHub Release before installing.

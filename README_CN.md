@@ -11,7 +11,7 @@
 - 语言：Go
 - 运行时依赖：Go 标准库与 `gopkg.in/yaml.v3 v3.0.1`
 - 插件目标：CLIProxyAPI C ABI v1
-- 兼容：`v7.2.83`、`v7.2.120`、`v7.2.157`
+- 兼容：`v7.2.83`、`v7.2.120`、`v7.2.157`、`v8.0.76`
 - 发布资产：GitHub Release 上的 Linux amd64 `.so` 与 SHA-256 checksum
 
 插件会在 CPA 内注册、检查 Codex 额度，并可通过 SMTP 或 Webhook 发信。邮件正文是公开安全模板，只含汇总数字。收件人和通知密钥保存在主机私有文件或 root-only env，不进本仓库。安装前请核对 GitHub Release 里的 checksum。
