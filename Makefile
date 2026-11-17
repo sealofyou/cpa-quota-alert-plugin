@@ -36,9 +36,14 @@ vet:
 race:
 	CGO_ENABLED=1 go test -race ./...
 
+# Pin the baseline x86-64 ISA for both Go and cgo C code. Hosts such as
+# generic QEMU VPS CPUs lack AVX/BMI2, and newer distro GCC builds may emit
+# them by default; CPA's preflight probe then dies with SIGILL.
 build-shared:
 	@mkdir -p dist
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 GOAMD64=v1 \
+	CGO_CFLAGS='-O2 -g -march=x86-64 -mtune=generic' \
+	go build \
 		-buildmode=c-shared \
 		-trimpath \
 		-ldflags='-s -w -buildid=' \
