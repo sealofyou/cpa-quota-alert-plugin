@@ -64,3 +64,13 @@ The page does not edit the systemd timer, CPA Management Key, Codex auth files, 
   field both register and apply `config_yaml`; a newer-schema reconfigure applies; a malformed
   reconfigure is rejected and leaves the previous config in place. Both new assertions fail on
   v0.3.0.
+
+## v0.3.2 baseline x86-64 release build
+
+- Problem: the v0.3.1 release asset was built after GitHub moved `ubuntu-latest` to
+  ubuntu-26.04. Its GCC 15 emitted AVX and BMI2 instructions (`vmovaps`, `vpinsrq`, `shlx`) in
+  the cgo C code without CPU feature gating. On a host whose virtual CPU only offers baseline
+  x86-64, CPA v8.0.76's plugin preflight probe died with `SIGILL` and the plugin did not load.
+  Do not deploy the v0.3.1 asset; v0.3.2 carries the same code.
+- Change: CI and Release run on `ubuntu-24.04` (the image that built the working v0.3.0 asset),
+  and `make build-shared` sets `GOAMD64=v1` and `CGO_CFLAGS=-march=x86-64 -mtune=generic`.

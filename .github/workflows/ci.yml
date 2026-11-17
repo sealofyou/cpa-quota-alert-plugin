@@ -13,7 +13,8 @@ permissions:
 
 jobs:
   linux-gate:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-26.04 GCC 15 emitted AVX/BMI2 in cgo code (v0.3.1 SIGILL).
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
